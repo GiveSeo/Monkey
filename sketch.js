@@ -475,7 +475,10 @@ function trunc1(x) {
 // =======================
 // pdraw
 // =======================
+let debugFrame = 0;
 function pdraw(p) {
+    debugFrame++;
+    
   p.background(245);
   p.scale(scale);
 
@@ -619,10 +622,15 @@ if (trailPoints.length > 1) {
   // ======================
   // 디버그 텍스트
   // ======================
-  minJoint1 = Math.min(minJoint1, currentAngleJoint1);
+ 
+  
+  if(debugFrame>5){
+     minJoint1 = Math.min(minJoint1, currentAngleJoint1);
   maxJoint1 = Math.max(maxJoint1, currentAngleJoint1);
   minJoint2 = Math.min(minJoint2, currentAngleJoint2);
-  maxJoint2 = Math.max(maxJoint2, currentAngleJoint2);
+  maxJoint2 = Math.max(maxJoint2, currentAngleJoint2);   
+  }
+ 
   p.push();
   p.fill(0);
   p.textSize(12);
@@ -639,7 +647,7 @@ if (trailPoints.length > 1) {
   p.text(`MIN JOINT1: ${minJoint1} deg`, 50, 250);
   p.text(`MAX JOINT1: ${maxJoint1} deg`, 50, 270);
   p.text(`MIN JOINT2: ${minJoint2} deg`, 50, 290);
-  p.text(`MAX JOINT1: ${maxJoint2} deg`, 50, 310);
+  p.text(`MAX JOINT2: ${maxJoint2} deg`, 50, 310);
   p.pop();
 
   // ======================
