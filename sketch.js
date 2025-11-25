@@ -21,10 +21,12 @@ function sketch() { // 화면에 시뮬레이터 띄우는 함수
 // =======================
 // SVG 관련
 // =======================
-let FILENAME = "Mouse.svg"
+let FILENAME = "sqaure.svg"
+let draw_scale = 0.5
 let svgPathPoints = []; // 최종: 로봇 좌표계 (x,y,pen)
 let showSvgPath = false; // 파란 선 표시 여부
-
+let Xoffset = -140;
+let Yoffset = +50;
 // upperarm 이미지의 기본 기울기(어깨→팔꿈치)
 let upperRestAngle = 0; // rad
 
@@ -37,12 +39,9 @@ let svgIndex = 0;
 let svgFrameSkip = 2;      // 숫자 줄이면 더 빨리 따라감
 let svgFrameCounter = 0;
 
-// (이 값들은 이제 직접 쓰진 않지만 남겨둠)
-let svgScale = 0.7;
-let svgOffsetX = 300;
-let svgOffsetY = 200;
 
 // SVG에서 <path>만 파싱해서 (x,y,pen) 리스트로 뽑는 함수
+
   function extractPathPointsFromSvg(svgText, sampleStep = 2) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgText, "image/svg+xml");
@@ -157,6 +156,10 @@ let topPath, upperPath, forePath;
 let currentAngleJoint1 = 0;
 let currentAngleJoint2 = 0;
 let currentPen = 0; // 0: up, 1: down
+let minJoint1 = 1e9;
+let maxJoint1 = -1e9;
+let minJoint2 = 1e9;
+let maxJoint2 = -1e9;
 
 const scale = 0.7;       // 전체 캔버스 스케일
 const moreHeight = 100;
@@ -346,7 +349,7 @@ function fitSvgPointsToWorkspace(points) {
   // 3) 로봇 작업반경
   const Lsum = link1Length + link2Length;
   const maxReach = Lsum * 0.9; // 살짝 여유
-  const scaleSvg = (maxReach * 0.5) / maxR;
+  const scaleSvg = (maxReach * draw_scale) / maxR;
   //             ^^^^^^^^^^^^^^^
   // 0.6 정도면 SVG가 팔길이보다 확실히 작아짐
   // 너무 크면 0.5, 너무 작으면 0.7 이런 식으로 직접 튜닝
@@ -357,8 +360,8 @@ function fitSvgPointsToWorkspace(points) {
 
   // 5) 한 번에 스케일 + 평행이동만 적용 (추가 리스케일 없음)
   const fitted = points.map((p) => {
-    const dx = (p.x - cx) * scaleSvg;
-    const dy = (p.y - cy) * scaleSvg;
+    const dx = (p.x - cx) * scaleSvg + Xoffset;
+    const dy = (p.y - cy) * scaleSvg + Yoffset;
     return {
       x: drawCx + dx,
       y: drawCy + dy,
@@ -600,6 +603,10 @@ if (trailPoints.length > 1) {
   // ======================
   // 디버그 텍스트
   // ======================
+  minJoint1 = Math.min(minJoint1, currentAngleJoint1);
+  maxJoint1 = Math.max(maxJoint1, currentAngleJoint1);
+  minJoint2 = Math.min(minJoint2, currentAngleJoint2);
+  maxJoint2 = Math.max(maxJoint2, currentAngleJoint2);
   p.push();
   p.fill(0);
   p.textSize(12);
@@ -613,6 +620,10 @@ if (trailPoints.length > 1) {
   p.text(`SVG pts: ${svgPathPoints.length}`, 50, 190);
   p.text(`SVG idx: ${svgIndex}`, 50, 210);
   p.text(`SVG motion: ${useSvgAsMotion}`, 50, 230);
+  p.text(`MIN JOINT1: ${minJoint1} deg`, 50, 250);
+  p.text(`MAX JOINT1: ${maxJoint1} deg`, 50, 270);
+  p.text(`MIN JOINT2: ${minJoint2} deg`, 50, 290);
+  p.text(`MAX JOINT1: ${maxJoint2} deg`, 50, 310);
   p.pop();
 
   // ======================
