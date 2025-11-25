@@ -1,0 +1,11 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- 정사각형 -->
+  <path d="M10 10 H190 V190 H10 Z" fill="none" stroke="black" stroke-width="2"></path>
+
+  <!-- 대각선 1 (↘) -->
+  <path d="M10 10 L190 190" stroke="black" stroke-width="2" fill="none"></path>
+
+  <!-- 대각선 2 (↙) -->
+  <path d="M190 10 L10 190" stroke="black" stroke-width="2" fill="none"></path>
+</svg>
