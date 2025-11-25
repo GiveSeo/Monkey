@@ -21,8 +21,9 @@ function sketch() { // 화면에 시뮬레이터 띄우는 함수
 // =======================
 // SVG 관련
 // =======================
-let FILENAME = "sqaure.svg"
-let draw_scale = 0.5
+let STEP = 2;
+let FILENAME = "Turtle.svg";
+let draw_scale = 0.4;
 let svgPathPoints = []; // 최종: 로봇 좌표계 (x,y,pen)
 let showSvgPath = false; // 파란 선 표시 여부
 let Xoffset = -140;
@@ -165,6 +166,11 @@ const scale = 0.7;       // 전체 캔버스 스케일
 const moreHeight = 100;
 const imageScale = 0.5;  // png 이미지 자체 스케일
 
+const J1_MIN = -30;
+const J1_MAX =  180;
+const J2_MIN =  -180;
+const J2_MAX =  180;
+
 // upperarm 이미지의 기본 기울기(어깨→팔꿈치)
 
 
@@ -303,7 +309,7 @@ function psetup(p) {
   const svgPath = spine.images.get(FILENAME); // Spine에 등록된 SVG 경로
   p.loadStrings(svgPath, (lines) => {
     const svgText = lines.join("\n");
-    const rawPoints = extractPathPointsFromSvg(svgText, 2);
+    const rawPoints = extractPathPointsFromSvg(svgText, STEP);
     console.log("SVG raw path points:", rawPoints.length);
     svgPathPoints = fitSvgPointsToWorkspace(rawPoints); // 로봇 작업 영역 안으로 매핑
     console.log("SVG fitted path points:", svgPathPoints.length);
@@ -461,6 +467,11 @@ function inverseKinematics2DOF(targetX, targetY, prevJoint1Deg, prevJoint2Deg) {
 
   return best;
 }
+function trunc1(x) {
+  return (x >= 0)
+    ? Math.floor(x * 10) / 10
+    : Math.ceil(x * 10) / 10;
+}
 // =======================
 // pdraw
 // =======================
@@ -493,9 +504,14 @@ if (isPlaying) {
       currentAngleJoint1,
       currentAngleJoint2
     );
-
-    currentAngleJoint1 = ik.joint1;
-    currentAngleJoint2 = ik.joint2;
+    
+    let j1 = trunc1(ik.joint1);
+    let j2 = trunc1(ik.joint2);
+    // 범위 내에 있는지 검사
+    j1 = Math.max(J1_MIN, Math.min(J1_MAX, j1));
+    j2 = Math.max(J2_MIN, Math.min(J2_MAX, j2));    
+    currentAngleJoint1 = j1;
+    currentAngleJoint2 = j2;
     currentPen = pt.pen;
   }
 }
