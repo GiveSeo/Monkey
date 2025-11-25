@@ -184,19 +184,6 @@ const FORE_JOINT_ELBOW_Y = 375;
 const FORE_PEN_X         = 192;
 const FORE_PEN_Y         = 146;
 
-// =======================
-// angleSequence (백업용 / 테스트용)
-// =======================
-let angleSequence = [
-  { joint1: 0,  joint2: 0,  duration: 100, pen: 0 },
-  { joint1: 30, joint2: 20, duration: 100, pen: 1 },
-  { joint1: 60, joint2: 40, duration: 100, pen: 1 },
-  { joint1: 90, joint2: 30, duration: 100, pen: 1 },
-  { joint1: 60, joint2: 50, duration: 100, pen: 1 },
-  { joint1: 30, joint2: 60, duration: 100, pen: 1 },
-  { joint1: 0,  joint2: 0,  duration: 100, pen: 0 },
-];
-
 let sequenceIndex = 0;
 let frameCounter = 0;
 let currentDuration = 0;
