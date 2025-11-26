@@ -581,7 +581,6 @@ if (trailPoints.length > 1) {
   p.text(`J2: ${currentAngleJoint2.toFixed(1)} deg`, 50, 70);
   p.text(`L1: ${link1Length.toFixed(0)}px`, 50, 90);
   p.text(`L2: ${link2Length.toFixed(0)}px`, 50, 110);
-  p.text(`Seq: ${sequenceIndex + 1} / ${angleSequence.length}`, 50, 130);
   p.text(isPlaying ? "Playing" : "Paused", 50, 150);
   p.text(`Pen: ${currentPen}`, 50, 170);
   p.text(`SVG pts: ${svgPathPoints.length}`, 50, 190);
