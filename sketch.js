@@ -14,7 +14,7 @@ function sketch() { // 화면에 시뮬레이터 띄우는 함수
 
 let STEP = 2;
 // 전역 변수
-let FILENAME = "Turtle.svg"
+let FILENAME = "input.svg"
 let draw_scale = 0.4
 let svgPathPoints = []; // 최종: 로봇 좌표계 (x,y,pen)
 let showSvgPath = false; // 파란 선 표시 여부
@@ -35,18 +35,17 @@ let svgFrameCounter = 0;
 
 
 // SVG에서 DOM으로 파싱해서 PATH만 가져오기
-  function extractPathPointsFromSvg(svgText, sampleStep = 2) {
+// SVG에서 DOM으로 파싱해서 PATH + 기본 도형 가져오기 (Transform 지원)
+// SVG에서 DOM으로 파싱해서 PATH + 기본 도형 가져오기 (Transform, use, defs 지원)
+// SVG에서 DOM으로 파싱해서 PATH + 기본 도형 가져오기 (Transform, use, defs 지원)
+// SVG에서 DOM으로 파싱해서 PATH + 기본 도형 가져오기 (Transform, use, defs 지원)
+// SVG에서 DOM으로 파싱해서 PATH + 기본 도형 가져오기 (Transform, use, defs 지원)
+function extractPathPointsFromSvg(svgText, sampleStep = 2) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgText, "image/svg+xml");
   const svgRoot = doc.documentElement;
 
-  const pathNodes = svgRoot.querySelectorAll("path");
   const points = [];
-
-  if (pathNodes.length === 0) {
-    console.warn("SVG에 <path>가 없습니다.");
-    return points;
-  }
 
   // 브라우저에서 길이/좌표 계산을 위해 임시 svg 생성
   const tempSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -57,17 +56,371 @@ let svgFrameCounter = 0;
   tempSvg.style.top = "-9999px";
   document.body.appendChild(tempSvg);
 
-  let lastGlobalPt = null; // 🔥 이전 path의 마지막 점 (글로벌)
+  let lastGlobalPt = null; // 이전 shape의 마지막 점
 
-  pathNodes.forEach((pathNode) => {
-    const pathEl = pathNode.cloneNode(true);
+  // Transform 파싱 함수
+  function parseTransform(transformStr) {
+    if (!transformStr) return null;
+    
+    const matrix = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+    
+    // translate 파싱
+    const translateMatch = transformStr.match(/translate\(([^)]+)\)/);
+    if (translateMatch) {
+      const values = translateMatch[1].split(/[\s,]+/).map(v => parseFloat(v));
+      matrix.e = values[0] || 0;
+      matrix.f = values[1] || 0;
+    }
+    
+    // scale 파싱
+    const scaleMatch = transformStr.match(/scale\(([^)]+)\)/);
+    if (scaleMatch) {
+      const values = scaleMatch[1].split(/[\s,]+/).map(v => parseFloat(v));
+      matrix.a = values[0] || 1;
+      matrix.d = values[1] || values[0] || 1;
+    }
+    
+    // rotate 파싱
+    const rotateMatch = transformStr.match(/rotate\(([^)]+)\)/);
+    if (rotateMatch) {
+      const values = rotateMatch[1].split(/[\s,]+/).map(v => parseFloat(v));
+      const angle = values[0] * Math.PI / 180;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      matrix.a = cos;
+      matrix.b = sin;
+      matrix.c = -sin;
+      matrix.d = cos;
+    }
+    
+    // matrix 파싱
+    const matrixMatch = transformStr.match(/matrix\(([^)]+)\)/);
+    if (matrixMatch) {
+      const values = matrixMatch[1].split(/[\s,]+/).map(v => parseFloat(v));
+      matrix.a = values[0];
+      matrix.b = values[1];
+      matrix.c = values[2];
+      matrix.d = values[3];
+      matrix.e = values[4];
+      matrix.f = values[5];
+    }
+    
+    return matrix;
+  }
+
+  // Transform 행렬 합성 함수
+  function multiplyMatrices(m1, m2) {
+    if (!m1) return m2;
+    if (!m2) return m1;
+    return {
+      a: m1.a * m2.a + m1.c * m2.b,
+      b: m1.b * m2.a + m1.d * m2.b,
+      c: m1.a * m2.c + m1.c * m2.d,
+      d: m1.b * m2.c + m1.d * m2.d,
+      e: m1.a * m2.e + m1.c * m2.f + m1.e,
+      f: m1.b * m2.e + m1.d * m2.f + m1.f
+    };
+  }
+
+  // 부모 transform들을 누적 계산
+  function getAccumulatedTransform(element) {
+    let accMatrix = null;
+    let current = element;
+    
+    while (current && current !== svgRoot) {
+      const transformStr = current.getAttribute('transform');
+      if (transformStr) {
+        const matrix = parseTransform(transformStr);
+        accMatrix = multiplyMatrices(matrix, accMatrix);
+      }
+      current = current.parentElement;
+    }
+    
+    return accMatrix;
+  }
+
+  // 요소가 실제로 렌더링되어야 하는지 확인
+  function shouldRender(element) {
+    // defs 내부는 렌더링하지 않음
+    let parent = element.parentElement;
+    while (parent) {
+      if (parent.tagName.toLowerCase() === 'defs') {
+        return false;
+      }
+      parent = parent.parentElement;
+    }
+    
+    // display:none이나 visibility:hidden 체크
+    const display = element.getAttribute('display');
+    const visibility = element.getAttribute('visibility');
+    if (display === 'none' || visibility === 'hidden') {
+      return false;
+    }
+    
+    return true;
+  }
+
+  // Transform 적용 함수
+  function applyTransform(x, y, matrix) {
+    if (!matrix) return { x, y };
+    return {
+      x: matrix.a * x + matrix.c * y + matrix.e,
+      y: matrix.b * x + matrix.d * y + matrix.f
+    };
+  }
+
+  // 기본 도형을 path로 변환하는 함수들 (transform 직접 적용)
+  function circleToPath(cx, cy, r, matrix) {
+    // transform을 중심점에 직접 적용
+    const center = applyTransform(cx, cy, matrix);
+    const newCx = center.x;
+    const newCy = center.y;
+    
+    // scale 고려 (반지름도 변환)
+    let newR = r;
+    if (matrix) {
+      // 평균 스케일 적용
+      const scaleX = Math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b);
+      const scaleY = Math.sqrt(matrix.c * matrix.c + matrix.d * matrix.d);
+      newR = r * (scaleX + scaleY) / 2;
+    }
+    
+    return `M ${newCx - newR},${newCy} A ${newR},${newR} 0 1,0 ${newCx + newR},${newCy} A ${newR},${newR} 0 1,0 ${newCx - newR},${newCy} Z`;
+  }
+
+  function ellipseToPath(cx, cy, rx, ry, matrix) {
+    const center = applyTransform(cx, cy, matrix);
+    const newCx = center.x;
+    const newCy = center.y;
+    
+    let newRx = rx, newRy = ry;
+    if (matrix) {
+      const scaleX = Math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b);
+      const scaleY = Math.sqrt(matrix.c * matrix.c + matrix.d * matrix.d);
+      newRx = rx * scaleX;
+      newRy = ry * scaleY;
+    }
+    
+    return `M ${newCx - newRx},${newCy} A ${newRx},${newRy} 0 1,0 ${newCx + newRx},${newCy} A ${newRx},${newRy} 0 1,0 ${newCx - newRx},${newCy} Z`;
+  }
+
+  function rectToPath(x, y, width, height, rx, ry, matrix) {
+    // 4개 꼭지점에 transform 적용
+    const p1 = applyTransform(x, y, matrix);
+    const p2 = applyTransform(x + width, y, matrix);
+    const p3 = applyTransform(x + width, y + height, matrix);
+    const p4 = applyTransform(x, y + height, matrix);
+    
+    if (rx || ry) {
+      // 간단하게 처리 (정확하지 않을 수 있음)
+      return `M ${p1.x},${p1.y} L ${p2.x},${p2.y} L ${p3.x},${p3.y} L ${p4.x},${p4.y} Z`;
+    }
+    return `M ${p1.x},${p1.y} L ${p2.x},${p2.y} L ${p3.x},${p3.y} L ${p4.x},${p4.y} Z`;
+  }
+
+  function lineToPath(x1, y1, x2, y2, matrix) {
+    const p1 = applyTransform(x1, y1, matrix);
+    const p2 = applyTransform(x2, y2, matrix);
+    return `M ${p1.x},${p1.y} L ${p2.x},${p2.y}`;
+  }
+
+  function polygonToPath(pointsStr, matrix) {
+    const coords = pointsStr.trim().split(/[\s,]+/).map(v => parseFloat(v));
+    if (coords.length < 4) return '';
+    
+    const p0 = applyTransform(coords[0], coords[1], matrix);
+    let path = `M ${p0.x},${p0.y}`;
+    
+    for (let i = 2; i < coords.length; i += 2) {
+      const p = applyTransform(coords[i], coords[i + 1], matrix);
+      path += ` L ${p.x},${p.y}`;
+    }
+    path += ' Z';
+    return path;
+  }
+
+  function polylineToPath(pointsStr, matrix) {
+    const coords = pointsStr.trim().split(/[\s,]+/).map(v => parseFloat(v));
+    if (coords.length < 4) return '';
+    
+    const p0 = applyTransform(coords[0], coords[1], matrix);
+    let path = `M ${p0.x},${p0.y}`;
+    
+    for (let i = 2; i < coords.length; i += 2) {
+      const p = applyTransform(coords[i], coords[i + 1], matrix);
+      path += ` L ${p.x},${p.y}`;
+    }
+    return path;
+  }
+
+  // <use> 요소를 실제 요소로 변환하는 정보 반환
+  function resolveUseElement(useEl) {
+    const href = useEl.getAttribute('href') || useEl.getAttribute('xlink:href');
+    if (!href) return null;
+    
+    const id = href.replace('#', '');
+    const referenced = svgRoot.querySelector(`#${id}`);
+    if (!referenced) return null;
+    
+    // 참조된 요소의 정보를 가져옴
+    const tagName = referenced.tagName.toLowerCase();
+    
+    // use의 x, y 속성
+    const x = parseFloat(useEl.getAttribute('x')) || 0;
+    const y = parseFloat(useEl.getAttribute('y')) || 0;
+    
+    // use의 transform 속성
+    const useTransform = useEl.getAttribute('transform');
+    
+    // 부모들의 누적 transform (use 요소 기준)
+    const parentTransform = getAccumulatedTransform(useEl);
+    
+    // 최종 transform 계산: 부모 transform → translate(x,y) → use transform
+    let finalMatrix = parentTransform;
+    
+    if (x !== 0 || y !== 0) {
+      const translateMatrix = { a: 1, b: 0, c: 0, d: 1, e: x, f: y };
+      finalMatrix = multiplyMatrices(finalMatrix, translateMatrix);
+    }
+    
+    if (useTransform) {
+      const useMatrix = parseTransform(useTransform);
+      finalMatrix = multiplyMatrices(finalMatrix, useMatrix);
+    }
+    
+    // 참조된 요소 자체의 transform도 고려
+    const refTransform = referenced.getAttribute('transform');
+    if (refTransform) {
+      const refMatrix = parseTransform(refTransform);
+      finalMatrix = multiplyMatrices(finalMatrix, refMatrix);
+    }
+    
+    return {
+      element: referenced,
+      transform: finalMatrix,
+      tagName: tagName
+    };
+  }
+
+  // 실제 렌더링할 요소들 수집 (use 해석 포함)
+  const allElements = [];
+  
+  // 일반 그래픽 요소
+  const directShapes = svgRoot.querySelectorAll("path, circle, rect, ellipse, line, polygon, polyline");
+  directShapes.forEach(shape => {
+    if (shouldRender(shape)) {
+      allElements.push({
+        element: shape,
+        transform: null, // getAccumulatedTransform에서 계산할 것
+        tagName: shape.tagName.toLowerCase()
+      });
+    }
+  });
+  
+  // use 요소들 처리
+  const useElements = svgRoot.querySelectorAll("use");
+  useElements.forEach(useEl => {
+    if (shouldRender(useEl)) {
+      const resolved = resolveUseElement(useEl);
+      if (resolved) {
+        console.log('USE element:', {
+          x: useEl.getAttribute('x'),
+          y: useEl.getAttribute('y'),
+          href: useEl.getAttribute('href') || useEl.getAttribute('xlink:href'),
+          transform: resolved.transform,
+          refElement: resolved.element
+        });
+        allElements.push(resolved);
+      }
+    }
+  });
+
+  console.log('Total elements to render:', allElements.length);
+
+  if (allElements.length === 0) {
+    console.warn("SVG에 렌더링할 그래픽 요소가 없습니다.");
+    document.body.removeChild(tempSvg);
+    return points;
+  }
+
+  allElements.forEach((shapeInfo) => {
+    let pathD = '';
+    const shape = shapeInfo.element;
+    const tagName = shapeInfo.tagName;
+    
+    // transform 계산: shapeInfo.transform이 있으면 사용, 없으면 계산
+    let transformMatrix;
+    if (shapeInfo.transform) {
+      // use 요소는 이미 계산된 transform 사용
+      transformMatrix = shapeInfo.transform;
+    } else {
+      // 일반 요소는 부모들의 transform 계산
+      transformMatrix = getAccumulatedTransform(shape);
+    }
+    
+    // 각 도형 타입에 따라 path 데이터 생성 (transform 직접 적용)
+    if (tagName === 'path') {
+      pathD = shape.getAttribute('d');
+      // path는 브라우저의 transform 처리를 사용 (그대로 유지)
+    } else if (tagName === 'circle') {
+      const cx = parseFloat(shape.getAttribute('cx')) || 0;
+      const cy = parseFloat(shape.getAttribute('cy')) || 0;
+      const r = parseFloat(shape.getAttribute('r')) || 0;
+      console.log('Circle:', { cx, cy, r, transform: transformMatrix });
+      pathD = circleToPath(cx, cy, r, transformMatrix);
+      transformMatrix = null; // 이미 적용했으므로 null로
+    } else if (tagName === 'ellipse') {
+      const cx = parseFloat(shape.getAttribute('cx')) || 0;
+      const cy = parseFloat(shape.getAttribute('cy')) || 0;
+      const rx = parseFloat(shape.getAttribute('rx')) || 0;
+      const ry = parseFloat(shape.getAttribute('ry')) || 0;
+      pathD = ellipseToPath(cx, cy, rx, ry, transformMatrix);
+      transformMatrix = null;
+    } else if (tagName === 'rect') {
+      const x = parseFloat(shape.getAttribute('x')) || 0;
+      const y = parseFloat(shape.getAttribute('y')) || 0;
+      const width = parseFloat(shape.getAttribute('width')) || 0;
+      const height = parseFloat(shape.getAttribute('height')) || 0;
+      const rx = parseFloat(shape.getAttribute('rx')) || 0;
+      const ry = parseFloat(shape.getAttribute('ry')) || 0;
+      pathD = rectToPath(x, y, width, height, rx, ry, transformMatrix);
+      transformMatrix = null;
+    } else if (tagName === 'line') {
+      const x1 = parseFloat(shape.getAttribute('x1')) || 0;
+      const y1 = parseFloat(shape.getAttribute('y1')) || 0;
+      const x2 = parseFloat(shape.getAttribute('x2')) || 0;
+      const y2 = parseFloat(shape.getAttribute('y2')) || 0;
+      pathD = lineToPath(x1, y1, x2, y2, transformMatrix);
+      transformMatrix = null;
+    } else if (tagName === 'polygon') {
+      const pointsStr = shape.getAttribute('points');
+      if (pointsStr) pathD = polygonToPath(pointsStr, transformMatrix);
+      transformMatrix = null;
+    } else if (tagName === 'polyline') {
+      const pointsStr = shape.getAttribute('points');
+      if (pointsStr) pathD = polylineToPath(pointsStr, transformMatrix);
+      transformMatrix = null;
+    }
+    
+    // transform을 적용할지 결정
+    const transformStr = transformMatrix ? 
+      `matrix(${transformMatrix.a},${transformMatrix.b},${transformMatrix.c},${transformMatrix.d},${transformMatrix.e},${transformMatrix.f})` : null;
+
+    if (!pathD) return;
+
+    // path 요소 생성 및 추가
+    const pathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    pathEl.setAttribute('d', pathD);
+    if (transformStr) {
+      pathEl.setAttribute('transform', transformStr);
+    }
     tempSvg.appendChild(pathEl);
 
     let totalLength;
     try {
       totalLength = pathEl.getTotalLength();
     } catch (e) {
-      console.warn("getTotalLength 실패, 이 path는 스킵:", e);
+      console.warn("getTotalLength 실패, 이 shape는 스킵:", tagName, e);
       tempSvg.removeChild(pathEl);
       return;
     }
@@ -79,13 +432,19 @@ let svgFrameCounter = 0;
 
     const step = sampleStep > 0 ? sampleStep : totalLength / 50;
 
-    // 이 path의 점들을 먼저 localPoints에 모은다
+    // 이 shape의 점들을 먼저 localPoints에 모은다
     const localPoints = [];
     let isFirst = true;
 
     for (let len = 0; len <= totalLength; len += step) {
       const pt = pathEl.getPointAtLength(len);
-      const pen = isFirst ? 0 : 1; // path 시작: pen=0(이동), 이후: pen=1(그리기)
+      const pen = isFirst ? 0 : 1;
+      
+      // 디버그: 첫 점과 마지막 점 출력
+      if (len === 0 || len >= totalLength - step) {
+        console.log(`${tagName} point at len=${len.toFixed(1)}:`, pt, 'transform:', transformStr);
+      }
+      
       localPoints.push({ x: pt.x, y: pt.y, pen });
       isFirst = false;
     }
@@ -98,7 +457,7 @@ let svgFrameCounter = 0;
 
     if (localPoints.length === 0) return;
 
-    //path -> path시 로봇 팔 움직이게 하는 임의 점 넣기
+    // shape -> shape 사이 로봇 팔 움직이게 하는 임의 점 넣기
     if (lastGlobalPt !== null) {
       const start = lastGlobalPt;
       const end = localPoints[0];
@@ -107,7 +466,6 @@ let svgFrameCounter = 0;
       const dy = end.y - start.y;
       const dist = Math.hypot(dx, dy);
 
-      // 거리가 멀수록 중간점을 많이 넣음
       const bridgeStep = sampleStep > 0 ? sampleStep : dist / 20;
       const bridgeCount = Math.max(1, Math.floor(dist / bridgeStep));
 
@@ -116,24 +474,23 @@ let svgFrameCounter = 0;
         points.push({
           x: start.x + dx * t,
           y: start.y + dy * t,
-          pen: 0, 
+          pen: 0,
         });
       }
     }
 
-    // 이번 path의 포인트들을 전역 points에 추가
+    // 이번 shape의 포인트들을 전역 points에 추가
     for (const lp of localPoints) {
       points.push(lp);
     }
 
-    // 다음 path를 위해 마지막 점 업데이트
+    // 다음 shape를 위해 마지막 점 업데이트
     lastGlobalPt = localPoints[localPoints.length - 1];
   });
 
   document.body.removeChild(tempSvg);
   return points;
 }
-
 // 로봇, 이미지 전역 변수
 let canvasWidth, canvasHeight;
 
