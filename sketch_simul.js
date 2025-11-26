@@ -17,130 +17,33 @@ function sketch() { // 화면에 시뮬레이터 띄우는 함수
 // =======================
 
 let STEP = 2;
-let FILENAME = "sqaure.svg";
+let FILENAME = "Cat.svg";
+
+let zeroPoseFrames = 60; 
 
 // 🔵 기본 스케일 + 팔 길이 배율
 const baseImageScale = 0.5;
 const baseDrawScale  = 0.5;
-let armScale = 1.0;                // <- 이 값만 바꾸면 팔+이미지+그림 전체가 같이 커짐
+let armScale = 1.0;
 
 let draw_scale  = baseDrawScale  * armScale;
 let imageScale  = baseImageScale * armScale;
 
-let svgPathPoints = []; // 최종: 로봇 좌표계 (x,y,pen)
+let svgPathPoints = []; // 사용하지 않음
 let workspacePoints = [];
-let showSvgPath = false; // 파란 선 표시 여부
+let showSvgPath = false;
 let Xoffset = -140;
 let Yoffset = +50;
 
 // 이미지 기준 기본 각도
-let upperRestAngle = 0; // rad
-let foreRestAngle  = 0; // rad
+let upperRestAngle = 0;
+let foreRestAngle  = 0;
 
-// SVG를 모션 기준으로 쓸지 여부 + 인덱스/속도
-let useSvgAsMotion = true;
-let svgIndex = 0;
-let svgFrameSkip = 2;      // 숫자 줄이면 더 빨리 따라감
-let svgFrameCounter = 0;
-
-// SVG에서 DOM으로 파싱해서 PATH만 가져오기
-function extractPathPointsFromSvg(svgText, sampleStep = 2) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(svgText, "image/svg+xml");
-  const svgRoot = doc.documentElement;
-
-  const pathNodes = svgRoot.querySelectorAll("path");
-  const points = [];
-
-  if (pathNodes.length === 0) {
-    console.warn("SVG에 <path>가 없습니다.");
-    return points;
-  }
-
-  // 브라우저에서 길이/좌표 계산을 위해 임시 svg 생성
-  const tempSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  tempSvg.setAttribute("width", "0");
-  tempSvg.setAttribute("height", "0");
-  tempSvg.style.position = "absolute";
-  tempSvg.style.left = "-9999px";
-  tempSvg.style.top = "-9999px";
-  document.body.appendChild(tempSvg);
-
-  let lastGlobalPt = null; // 이전 path의 마지막 점 (글로벌)
-
-  pathNodes.forEach((pathNode) => {
-    const pathEl = pathNode.cloneNode(true);
-    tempSvg.appendChild(pathEl);
-
-    let totalLength;
-    try {
-      totalLength = pathEl.getTotalLength();
-    } catch (e) {
-      console.warn("getTotalLength 실패, 이 path는 스킵:", e);
-      tempSvg.removeChild(pathEl);
-      return;
-    }
-
-    if (!totalLength || totalLength === 0) {
-      tempSvg.removeChild(pathEl);
-      return;
-    }
-
-    const step = sampleStep > 0 ? sampleStep : totalLength / 50;
-
-    // 이 path의 점들을 먼저 localPoints에 모은다
-    const localPoints = [];
-    let isFirst = true;
-
-    for (let len = 0; len <= totalLength; len += step) {
-      const pt = pathEl.getPointAtLength(len);
-      const pen = isFirst ? 0 : 1; // path 시작: pen=0(이동), 이후: pen=1(그리기)
-      localPoints.push({ x: pt.x, y: pt.y, pen });
-      isFirst = false;
-    }
-
-    // 끝점 보정
-    const lastPt = pathEl.getPointAtLength(totalLength);
-    localPoints.push({ x: lastPt.x, y: lastPt.y, pen: 1 });
-
-    tempSvg.removeChild(pathEl);
-
-    if (localPoints.length === 0) return;
-
-    // path -> path 사이에 로봇 팔 이동용 브릿지 점들
-    if (lastGlobalPt !== null) {
-      const start = lastGlobalPt;
-      const end = localPoints[0];
-
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const dist = Math.hypot(dx, dy);
-
-      const bridgeStep = sampleStep > 0 ? sampleStep : dist / 20;
-      const bridgeCount = Math.max(1, Math.floor(dist / bridgeStep));
-
-      for (let i = 1; i <= bridgeCount; i++) {
-        const t = i / (bridgeCount + 1);
-        points.push({
-          x: start.x + dx * t,
-          y: start.y + dy * t,
-          pen: 0, 
-        });
-      }
-    }
-
-    // 이번 path의 포인트들을 전역 points에 추가
-    for (const lp of localPoints) {
-      points.push(lp);
-    }
-
-    // 다음 path를 위해 마지막 점 업데이트
-    lastGlobalPt = localPoints[localPoints.length - 1];
-  });
-
-  document.body.removeChild(tempSvg);
-  return points;
-}
+// 🔵 초록 네모 채우기용 변수
+let fillPoints = []; // 초록 네모 안의 모든 점들
+let fillIndex = 0;
+let fillFrameSkip = 1; // 점 사이 이동 속도
+let fillFrameCounter = 0;
 
 // 로봇, 이미지 전역 변수
 let canvasWidth, canvasHeight;
@@ -153,19 +56,19 @@ let topPath, upperPath, forePath;
 
 let currentAngleJoint1 = 0;
 let currentAngleJoint2 = 0;
-let currentPen = 0; // 0: up, 1: down
+let currentPen = 0;
 let minJoint1 = 1e9;
 let maxJoint1 = -1e9;
 let minJoint2 = 1e9;
 let maxJoint2 = -1e9;
 
-const scale = 0.7;       // 전체 캔버스 스케일
+const scale = 0.7;
 const moreHeight = 100;
 
 const J1_MIN = -30;
 const J1_MAX =  180;
-const J2_MIN =  -180;
-const J2_MAX =  180;
+const J2_MIN =  0;
+const J2_MAX =  130;
 
 // 이미지 픽셀 정보
 const TOP_JOINT_X = 746;
@@ -187,10 +90,8 @@ let currentDuration = 0;
 let isPlaying = true;
 let trailPoints = [];
 
-// 🔵 SVG가 실제로 차지하는 영역(bbox) = 종이 영역
 let paperRect = null;
-// 🔵 종이 안에서 팔이 네 꼭짓점 모두 도달 가능한 최대 정사각형
-let maxSquare = null;
+let maxSquare = null; // 이제 직사각형 정보 저장
 
 // =======================
 
@@ -215,47 +116,43 @@ function psetup(p) {
   canvasWidth = 1200 * scale + 400;
   canvasHeight = 800 * scale + moreHeight;
 
-  // 🔵 armScale 반영해서 스케일 재계산
   imageScale = baseImageScale * armScale;
   draw_scale = baseDrawScale * armScale;
 
-  // spine 이미지 경로
   topPath   = spine.images.get("top.png");
   upperPath = spine.images.get("upperarm.png");
   forePath  = spine.images.get("forearm.png");
 
-  // p5 이미지 로드
   imgTop   = p.loadImage(topPath);
   imgUpper = p.loadImage(upperPath);
   imgFore  = p.loadImage(forePath);
 
-  // upperarm 길이 (엘보우 - 어깨)
+  // upperarm 길이
   {
     const dx1 = (UPPER_JOINT_ELBOW_X - UPPER_JOINT_BASE_X) * imageScale;
     const dy1 = (UPPER_JOINT_ELBOW_Y - UPPER_JOINT_BASE_Y) * imageScale;
     link1Length = Math.hypot(dx1, dy1);
   }
 
-  // upperarm 기본 기울기 (이미지 기준 어깨→팔꿈치)
+  // upperarm 기본 기울기
   {
     const dxImg = (UPPER_JOINT_ELBOW_X - UPPER_JOINT_BASE_X);
     const dyImg = (UPPER_JOINT_ELBOW_Y - UPPER_JOINT_BASE_Y);
-    upperRestAngle = Math.atan2(dyImg, dxImg); // rad
+    upperRestAngle = Math.atan2(dyImg, dxImg);
   }
 
-  // forearm 길이 (엘보우→펜 끝 거리)
+  // forearm 길이
   {
     const dx2 = (FORE_PEN_X - FORE_JOINT_ELBOW_X) * imageScale;
     const dy2 = (FORE_PEN_Y - FORE_JOINT_ELBOW_Y) * imageScale;
     link2Length = Math.hypot(dx2, dy2);
 
-    // forearm 기본 기울기 (이미지 기준 엘보우→펜)
     const dxImg2 = (FORE_PEN_X - FORE_JOINT_ELBOW_X);
     const dyImg2 = (FORE_PEN_Y - FORE_JOINT_ELBOW_Y);
-    foreRestAngle = Math.atan2(dyImg2, dxImg2); // rad
+    foreRestAngle = Math.atan2(dyImg2, dxImg2);
   }
 
-  // 베이스 위치 (화면 하단 근처)
+  // 베이스 위치
   baseX = 800;
   const groundY = canvasHeight - 50;
 
@@ -267,21 +164,28 @@ function psetup(p) {
     baseY = groundY - 100;
   }
 
-  // 🔵 현재 팔/각도 기준 워크스페이스 샘플링
   precomputeWorkspace();
 
-  // SVG 로드
-  const svgPath = spine.images.get(FILENAME); // Spine에 등록된 SVG 경로
-  p.loadStrings(svgPath, (lines) => {
-    const svgText = lines.join("\n");
-    const rawPoints = extractPathPointsFromSvg(svgText, STEP);
-    console.log("SVG raw path points:", rawPoints.length);
-    svgPathPoints = fitSvgPointsToWorkspace(rawPoints); // 로봇 작업 영역 안으로 매핑
-    console.log("SVG fitted path points:", svgPathPoints.length);
+  // 🔵 더미 paperRect 생성 (워크스페이스 기반)
+  const Lsum = link1Length + link2Length;
+  const maxReach = Lsum * 0.9;
+  const drawCx = baseX;
+  const drawCy = baseY - Lsum * 0.6;
+  
+  paperRect = {
+    x: drawCx - maxReach,
+    y: drawCy - maxReach,
+    w: maxReach * 2,
+    h: maxReach * 2,
+  };
 
-    // 🔵 SVG 위치 기준 종이 영역에서 최대 정사각형 계산
-    maxSquare = findMaxSquareInPaper();
-  });
+  // 🔵 최대 직사각형 계산
+  maxSquare = findMaxRectangleInPaper();
+  
+  // 🔵 초록 네모 안의 모든 점 생성
+  if (maxSquare) {
+    generateFillPoints(maxSquare);
+  }
 
   w2custompopup.resize(canvasWidth + 16, canvasHeight + 96);
   p.createCanvas(canvasWidth, canvasHeight);
@@ -291,72 +195,25 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-// =======================
-// SVG 포인트를 로봇 작업 영역 (베이스 위 반원)으로 매핑
-// =======================
-function fitSvgPointsToWorkspace(points) {
-  if (!points || points.length === 0) return [];
+function allPointsReachableInRect(cx, cy, width, height, maxGridStep) {
+  const halfW = width / 2;
+  const halfH = height / 2;
 
-  // 1) SVG bounding box
-  let minX = Infinity, maxX = -Infinity;
-  let minY = Infinity, maxY = -Infinity;
-  for (const p of points) {
-    if (p.x < minX) minX = p.x;
-    if (p.x > maxX) maxX = p.x;
-    if (p.y < minY) minY = p.y;
-    if (p.y > maxY) maxY = p.y;
+  if (width < 1 || height < 1) {
+    return true;
   }
 
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
+  const stepX = Math.min(maxGridStep, width / 4); 
+  const stepY = Math.min(maxGridStep, height / 4);
 
-  // 2) 중심 기준 최대 반경
-  let maxR = 0;
-  for (const p of points) {
-    const dx = p.x - cx;
-    const dy = p.y - cy;
-    const r  = Math.hypot(dx, dy);
-    if (r > maxR) maxR = r;
+  for (let x = cx - halfW; x <= cx + halfW + 1e-6; x += stepX) {
+    for (let y = cy - halfH; y <= cy + halfH + 1e-6; y += stepY) {
+      if (!isReachableSimple(x, y)) {
+        return false;
+      }
+    }
   }
-  if (maxR < 1e-6) maxR = 1.0;
-
-  // 3) 로봇 작업반경
-  const Lsum = link1Length + link2Length;
-  const maxReach = Lsum * 0.9; // 살짝 여유
-  const scaleSvg = (maxReach * draw_scale) / maxR;
-
-  // 4) 그림 중심을 베이스 위쪽에 배치
-  const drawCx = baseX;
-  const drawCy = baseY - Lsum * 0.6;
-
-  // 5) 한 번에 스케일 + 평행이동만 적용
-  const fitted = points.map((p) => {
-    const dx = (p.x - cx) * scaleSvg + Xoffset;
-    const dy = (p.y - cy) * scaleSvg + Yoffset;
-    return {
-      x: drawCx + dx,
-      y: drawCy + dy,
-      pen: p.pen,
-    };
-  });
-
-  // 🔵 fitted 기준 bbox = 종이 영역
-  let minFx = Infinity, maxFx = -Infinity;
-  let minFy = Infinity, maxFy = -Infinity;
-  for (const fp of fitted) {
-    if (fp.x < minFx) minFx = fp.x;
-    if (fp.x > maxFx) maxFx = fp.x;
-    if (fp.y < minFy) minFy = fp.y;
-    if (fp.y > maxFy) maxFy = fp.y;
-  }
-  paperRect = {
-    x: minFx,
-    y: minFy,
-    w: maxFx - minFx,
-    h: maxFy - minFy,
-  };
-
-  return fitted;
+  return true;
 }
 
 // =======================
@@ -365,8 +222,8 @@ function fitSvgPointsToWorkspace(points) {
 function precomputeWorkspace() {
   workspacePoints = [];
 
-  const step1 = 3; // joint1 샘플 간격 (deg)
-  const step2 = 3; // joint2 샘플 간격 (deg)
+  const step1 = 3;
+  const step2 = 3;
 
   for (let j1 = J1_MIN; j1 <= J1_MAX; j1 += step1) {
     for (let j2 = J2_MIN; j2 <= J2_MAX; j2 += step2) {
@@ -387,7 +244,7 @@ function precomputeWorkspace() {
 }
 
 // =======================
-// 점 (x, y)가 각도 제한 내에서 도달 가능한지 판별
+// 점 도달 가능 여부 판별
 // =======================
 function isReachableSimple(x, y) {
   const L1 = link1Length;
@@ -430,48 +287,98 @@ function isReachableSimple(x, y) {
 }
 
 // =======================
-// 종이 영역 안에서 팔이 네 꼭짓점 모두 도달 가능한 최대 정사각형 찾기
+// 최대 직사각형 찾기
 // =======================
-function findMaxSquareInPaper() {
+function findMaxRectangleInPaper() {
   if (!paperRect) return null;
 
   const { x, y, w, h } = paperRect;
   const cx = x + w / 2;
   const cy = y + h / 2;
-  const maxPossibleSide = Math.min(w, h);
 
-  let bestSide = 0;
-  const step = 4; // 해상도: 줄이면 더 정확하지만 느려짐
+  let bestArea = 0;
+  let bestRect = null;
+  const widthStep = 5;
+  const heightStep = 5;
+  const maxGridStep = 8;
 
-  for (let side = 10; side <= maxPossibleSide; side += step) {
-    const half = side / 2;
+  // 가능한 모든 폭/높이 조합 탐색
+  for (let width = 10; width <= w; width += widthStep) {
+    for (let height = 10; height <= h; height += heightStep) {
+      const halfW = width / 2;
+      const halfH = height / 2;
 
-    const corners = [
-      { x: cx - half, y: cy - half },
-      { x: cx + half, y: cy - half },
-      { x: cx + half, y: cy + half },
-      { x: cx - half, y: cy + half },
-    ];
+      const corners = [
+        { x: cx - halfW, y: cy - halfH }, // 좌상
+        { x: cx + halfW, y: cy - halfH }, // 우상
+        { x: cx + halfW, y: cy + halfH }, // 우하
+        { x: cx - halfW, y: cy + halfH }, // 좌하
+      ];
 
-    // 1) 네모가 종이 안에 완전히 들어가야 함
-    let insidePaper = corners.every(
-      (p) =>
-        p.x >= x && p.x <= x + w &&
-        p.y >= y && p.y <= y + h
-    );
-    if (!insidePaper) continue;
+      // 1) 직사각형이 종이 안에 완전히 들어가야 함
+      let insidePaper = corners.every(
+        (p) =>
+          p.x >= x && p.x <= x + w &&
+          p.y >= y && p.y <= y + h
+      );
+      if (!insidePaper) continue;
 
-    // 2) 네 꼭짓점 모두 도달 가능해야 함
-    let allReachable = corners.every((p) => isReachableSimple(p.x, p.y));
-    if (allReachable) {
-      bestSide = side;
+      // 2) 경계 점들 빠른 체크
+      const edgeMids = [
+        { x: cx,         y: cy - halfH }, // 상 변 중앙
+        { x: cx + halfW, y: cy },         // 우 변 중앙
+        { x: cx,         y: cy + halfH }, // 하 변 중앙
+        { x: cx - halfW, y: cy },         // 좌 변 중앙
+      ];
+
+      const boundaryPoints = corners.concat(edgeMids);
+      let boundaryOK = boundaryPoints.every((p) => isReachableSimple(p.x, p.y));
+      if (!boundaryOK) continue;
+
+      // 3) 내부 전체 그리드 샘플링
+      if (!allPointsReachableInRect(cx, cy, width, height, maxGridStep)) {
+        continue;
+      }
+
+      // 면적 계산
+      const area = width * height;
+      if (area > bestArea) {
+        bestArea = area;
+        bestRect = { cx, cy, width, height };
+      }
     }
   }
 
-  if (bestSide > 0) {
-    return { cx, cy, side: bestSide };
+  return bestRect;
+}
+
+// =======================
+// 🔵 직사각형 안의 모든 점 생성 (지그재그 패턴)
+// =======================
+function generateFillPoints(rect) {
+  fillPoints = [];
+  
+  const { cx, cy, width, height } = rect;
+  const halfW = width / 2;
+  const halfH = height / 2;
+  const spacing = 5; // 점 간격 (픽셀)
+  
+  // 지그재그로 채우기
+  let goingRight = true;
+  for (let y = cy - halfH; y <= cy + halfH; y += spacing) {
+    if (goingRight) {
+      for (let x = cx - halfW; x <= cx + halfW; x += spacing) {
+        fillPoints.push({ x, y, pen: 1 });
+      }
+    } else {
+      for (let x = cx + halfW; x >= cx - halfW; x -= spacing) {
+        fillPoints.push({ x, y, pen: 1 });
+      }
+    }
+    goingRight = !goingRight;
   }
-  return null;
+  
+  console.log(`Generated ${fillPoints.length} fill points`);
 }
 
 // =======================
@@ -574,7 +481,7 @@ function pdraw(p) {
   p.background(245);
   p.scale(scale);
 
-  // 🔵 워크스페이스
+  // 워크스페이스
   if (workspacePoints.length > 0) {
     p.push();
     p.stroke(0, 150, 255, 80);
@@ -585,7 +492,7 @@ function pdraw(p) {
     p.pop();
   }
 
-  // 🔵 종이 영역(= SVG bbox)
+  // 종이 영역
   if (paperRect) {
     p.push();
     p.noFill();
@@ -595,60 +502,63 @@ function pdraw(p) {
     p.pop();
   }
 
-  // 🔵 최대 정사각형
+  // 최대 직사각형
   if (maxSquare) {
     p.push();
     p.noFill();
     p.stroke(0, 200, 0);
     p.strokeWeight(3);
     p.rectMode(p.CENTER);
-    p.rect(maxSquare.cx, maxSquare.cy, maxSquare.side, maxSquare.side);
+    p.rect(maxSquare.cx, maxSquare.cy, maxSquare.width, maxSquare.height);
     p.rectMode(p.CORNER);
     p.pop();
   }
 
+  // ======================
   // 1) 각도 / 펜 상태 업데이트
-  if (isPlaying) {
-    if (useSvgAsMotion && svgPathPoints.length > 0) {
+  // ======================
+  if (zeroPoseFrames > 0) {
+    currentAngleJoint1 = 0;
+    currentAngleJoint2 = 0;
+    currentPen = 0;
+    zeroPoseFrames--;
+  } else if (isPlaying && fillPoints.length > 0) {
+    // 🔵 초록 네모 채우기
+    const pt = fillPoints[fillIndex];
 
-      const pt = svgPathPoints[svgIndex];
-
-      const dynamicSkip = (pt.pen === 0 ? 1 : svgFrameSkip);
-
-      svgFrameCounter++;
-      if (svgFrameCounter >= dynamicSkip) {
-        svgFrameCounter = 0;
-        svgIndex++;
-        if (svgIndex >= svgPathPoints.length) {
-          svgIndex = svgPathPoints.length - 1;
-        }
+    fillFrameCounter++;
+    if (fillFrameCounter >= fillFrameSkip) {
+      fillFrameCounter = 0;
+      fillIndex++;
+      if (fillIndex >= fillPoints.length) {
+        fillIndex = fillPoints.length - 1;
+        isPlaying = false; // 완료
       }
+    }
 
-      const ik = inverseKinematics2DOF(
-        pt.x,
-        pt.y,
-        currentAngleJoint1,
-        currentAngleJoint2
-      );
-      
-      if (ik.reachable) {
-        let j1 = trunc1(ik.joint1);
-        let j2 = trunc1(ik.joint2);
+    const ik = inverseKinematics2DOF(
+      pt.x,
+      pt.y,
+      currentAngleJoint1,
+      currentAngleJoint2
+    );
+    
+    if (ik.reachable) {
+      let j1 = trunc1(ik.joint1);
+      let j2 = trunc1(ik.joint2);
 
-        currentAngleJoint1 = j1;
-        currentAngleJoint2 = j2;
-        currentPen = pt.pen;
-      } else {
-        currentPen = 0;
-      }
+      currentAngleJoint1 = j1;
+      currentAngleJoint2 = j2;
+      currentPen = pt.pen;
+    } else {
+      currentPen = 0;
     }
   }
 
-  // 관절 각도(도 → 라디안, 부호 보정)
+  // 관절 각도
   const theta1 = p.radians(currentAngleJoint1) * -1;
   const theta2 = p.radians(currentAngleJoint2) * -1;
 
-  // upperarm 기본 기울기 포함한 FK용 각도
   const theta1_fk = theta1 + upperRestAngle;
 
   // 포워드 키네매틱스
@@ -737,42 +647,15 @@ function pdraw(p) {
   p.text(`J2: ${currentAngleJoint2.toFixed(1)} deg`, 50, 70);
   p.text(`L1: ${link1Length.toFixed(0)}px`, 50, 90);
   p.text(`L2: ${link2Length.toFixed(0)}px`, 50, 110);
-  p.text(isPlaying ? "Playing" : "Paused", 50, 150);
+  p.text(isPlaying ? "Playing" : "Completed", 50, 150);
   p.text(`Pen: ${currentPen}`, 50, 170);
-  p.text(`SVG pts: ${svgPathPoints.length}`, 50, 190);
-  p.text(`SVG idx: ${svgIndex}`, 50, 210);
-  p.text(`SVG motion: ${useSvgAsMotion}`, 50, 230);
-  p.text(`MIN JOINT1: ${minJoint1} deg`, 50, 250);
-  p.text(`MAX JOINT1: ${maxJoint1} deg`, 50, 270);
-  p.text(`MIN JOINT2: ${minJoint2} deg`, 50, 290);
-  p.text(`MAX JOINT2: ${maxJoint2} deg`, 50, 310);
-  p.text(`MAX SQUARE: ${maxSquare ? maxSquare.side.toFixed(1) : 0} px`, 50, 330);
-  p.pop();
-
-  // SVG 원본 궤적 (파란 선)
-  if (showSvgPath) {
-    drawSvgPathPoints(p);
-  }
-}
-
-// =======================
-// SVG 궤적 그리기
-// =======================
-function drawSvgPathPoints(p) {
-  if (!svgPathPoints || svgPathPoints.length < 2) return;
-
-  p.push();
-  p.stroke(0, 0, 255);
-  p.strokeWeight(2);
-  p.noFill();
-
-  for (let i = 1; i < svgPathPoints.length; i++) {
-    const prev = svgPathPoints[i - 1];
-    const curr = svgPathPoints[i];
-
-    if (prev.pen === 1 && curr.pen === 1) {
-      p.line(prev.x, prev.y, curr.x, curr.y);
-    }
-  }
+  p.text(`Fill pts: ${fillPoints.length}`, 50, 190);
+  p.text(`Fill idx: ${fillIndex}`, 50, 210);
+  p.text(`MIN JOINT1: ${minJoint1.toFixed(1)} deg`, 50, 230);
+  p.text(`MAX JOINT1: ${maxJoint1.toFixed(1)} deg`, 50, 250);
+  p.text(`MIN JOINT2: ${minJoint2.toFixed(1)} deg`, 50, 270);
+  p.text(`MAX JOINT2: ${maxJoint2.toFixed(1)} deg`, 50, 290);
+  p.text(`MAX RECT: ${maxSquare ? maxSquare.width.toFixed(0) : 0}x${maxSquare ? maxSquare.height.toFixed(0) : 0} px`, 50, 310);
+  p.text(`AREA: ${maxSquare ? (maxSquare.width * maxSquare.height).toFixed(0) : 0} px²`, 50, 330);
   p.pop();
 }
