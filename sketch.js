@@ -12,30 +12,19 @@ function sketch() { // 화면에 시뮬레이터 띄우는 함수
   }, "p5-canvas");
 }
 
-// =======================
-// 전역 변수
-// =======================
-
 let STEP = 2;
-let FILENAME = "sqaure.svg";
-
-// 🔵 기본 스케일 + 팔 길이 배율
-const baseImageScale = 0.5;
-const baseDrawScale  = 0.5;
-let armScale = 1.0;                // <- 이 값만 바꾸면 팔+이미지+그림 전체가 같이 커짐
-
-let draw_scale  = baseDrawScale  * armScale;
-let imageScale  = baseImageScale * armScale;
-
+// 전역 변수
+let FILENAME = "Turtle.svg"
+let draw_scale = 0.4
 let svgPathPoints = []; // 최종: 로봇 좌표계 (x,y,pen)
-let workspacePoints = [];
 let showSvgPath = false; // 파란 선 표시 여부
 let Xoffset = -140;
 let Yoffset = +50;
-
-// 이미지 기준 기본 각도
+// upperarm 이미지의 기본 기울기(어깨→팔꿈치)
 let upperRestAngle = 0; // rad
-let foreRestAngle  = 0; // rad
+
+// [NEW] forearm 이미지에서 "엘보우→펜" 방향의 기본 기울기
+let foreRestAngle = 0;  // rad
 
 // SVG를 모션 기준으로 쓸지 여부 + 인덱스/속도
 let useSvgAsMotion = true;
@@ -43,8 +32,10 @@ let svgIndex = 0;
 let svgFrameSkip = 2;      // 숫자 줄이면 더 빨리 따라감
 let svgFrameCounter = 0;
 
+
+
 // SVG에서 DOM으로 파싱해서 PATH만 가져오기
-function extractPathPointsFromSvg(svgText, sampleStep = 2) {
+  function extractPathPointsFromSvg(svgText, sampleStep = 2) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgText, "image/svg+xml");
   const svgRoot = doc.documentElement;
@@ -66,7 +57,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
   tempSvg.style.top = "-9999px";
   document.body.appendChild(tempSvg);
 
-  let lastGlobalPt = null; // 이전 path의 마지막 점 (글로벌)
+  let lastGlobalPt = null; // 🔥 이전 path의 마지막 점 (글로벌)
 
   pathNodes.forEach((pathNode) => {
     const pathEl = pathNode.cloneNode(true);
@@ -107,7 +98,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
 
     if (localPoints.length === 0) return;
 
-    // path -> path 사이에 로봇 팔 이동용 브릿지 점들
+    //path -> path시 로봇 팔 움직이게 하는 임의 점 넣기
     if (lastGlobalPt !== null) {
       const start = lastGlobalPt;
       const end = localPoints[0];
@@ -116,6 +107,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
       const dy = end.y - start.y;
       const dist = Math.hypot(dx, dy);
 
+      // 거리가 멀수록 중간점을 많이 넣음
       const bridgeStep = sampleStep > 0 ? sampleStep : dist / 20;
       const bridgeCount = Math.max(1, Math.floor(dist / bridgeStep));
 
@@ -161,11 +153,15 @@ let maxJoint2 = -1e9;
 
 const scale = 0.7;       // 전체 캔버스 스케일
 const moreHeight = 100;
+const imageScale = 0.5;  // png 이미지 자체 스케일
 
 const J1_MIN = -30;
 const J1_MAX =  180;
 const J2_MIN =  -180;
 const J2_MAX =  180;
+
+// upperarm 이미지의 기본 기울기(어깨→팔꿈치)
+
 
 // 이미지 픽셀 정보
 const TOP_JOINT_X = 746;
@@ -187,13 +183,6 @@ let currentDuration = 0;
 let isPlaying = true;
 let trailPoints = [];
 
-// 🔵 SVG가 실제로 차지하는 영역(bbox) = 종이 영역
-let paperRect = null;
-// 🔵 종이 안에서 팔이 네 꼭짓점 모두 도달 가능한 최대 정사각형
-let maxSquare = null;
-
-// =======================
-
 function pop_sketch() {
   const option = {
     title: "2DOF Robot Simulator",
@@ -208,16 +197,13 @@ function pop_sketch() {
   };
 
   w2custompopup.open(option);
+
 }
 
 // psetup
 function psetup(p) {
   canvasWidth = 1200 * scale + 400;
   canvasHeight = 800 * scale + moreHeight;
-
-  // 🔵 armScale 반영해서 스케일 재계산
-  imageScale = baseImageScale * armScale;
-  draw_scale = baseDrawScale * armScale;
 
   // spine 이미지 경로
   topPath   = spine.images.get("top.png");
@@ -248,8 +234,7 @@ function psetup(p) {
     const dx2 = (FORE_PEN_X - FORE_JOINT_ELBOW_X) * imageScale;
     const dy2 = (FORE_PEN_Y - FORE_JOINT_ELBOW_Y) * imageScale;
     link2Length = Math.hypot(dx2, dy2);
-
-    // forearm 기본 기울기 (이미지 기준 엘보우→펜)
+        // [NEW] forearm 기본 기울기 (이미지 기준 엘보우→펜)
     const dxImg2 = (FORE_PEN_X - FORE_JOINT_ELBOW_X);
     const dyImg2 = (FORE_PEN_Y - FORE_JOINT_ELBOW_Y);
     foreRestAngle = Math.atan2(dyImg2, dxImg2); // rad
@@ -267,9 +252,6 @@ function psetup(p) {
     baseY = groundY - 100;
   }
 
-  // 🔵 현재 팔/각도 기준 워크스페이스 샘플링
-  precomputeWorkspace();
-
   // SVG 로드
   const svgPath = spine.images.get(FILENAME); // Spine에 등록된 SVG 경로
   p.loadStrings(svgPath, (lines) => {
@@ -278,9 +260,6 @@ function psetup(p) {
     console.log("SVG raw path points:", rawPoints.length);
     svgPathPoints = fitSvgPointsToWorkspace(rawPoints); // 로봇 작업 영역 안으로 매핑
     console.log("SVG fitted path points:", svgPathPoints.length);
-
-    // 🔵 SVG 위치 기준 종이 영역에서 최대 정사각형 계산
-    maxSquare = findMaxSquareInPaper();
   });
 
   w2custompopup.resize(canvasWidth + 16, canvasHeight + 96);
@@ -324,12 +303,15 @@ function fitSvgPointsToWorkspace(points) {
   const Lsum = link1Length + link2Length;
   const maxReach = Lsum * 0.9; // 살짝 여유
   const scaleSvg = (maxReach * draw_scale) / maxR;
+  //             ^^^^^^^^^^^^^^^
+  // 0.6 정도면 SVG가 팔길이보다 확실히 작아짐
+  // 너무 크면 0.5, 너무 작으면 0.7 이런 식으로 직접 튜닝
 
   // 4) 그림 중심을 베이스 위쪽에 배치
   const drawCx = baseX;
   const drawCy = baseY - Lsum * 0.6;
 
-  // 5) 한 번에 스케일 + 평행이동만 적용
+  // 5) 한 번에 스케일 + 평행이동만 적용 (추가 리스케일 없음)
   const fitted = points.map((p) => {
     const dx = (p.x - cx) * scaleSvg + Xoffset;
     const dy = (p.y - cy) * scaleSvg + Yoffset;
@@ -340,162 +322,34 @@ function fitSvgPointsToWorkspace(points) {
     };
   });
 
-  // 🔵 fitted 기준 bbox = 종이 영역
-  let minFx = Infinity, maxFx = -Infinity;
-  let minFy = Infinity, maxFy = -Infinity;
-  for (const fp of fitted) {
-    if (fp.x < minFx) minFx = fp.x;
-    if (fp.x > maxFx) maxFx = fp.x;
-    if (fp.y < minFy) minFy = fp.y;
-    if (fp.y > maxFy) maxFy = fp.y;
-  }
-  paperRect = {
-    x: minFx,
-    y: minFy,
-    w: maxFx - minFx,
-    h: maxFy - minFy,
-  };
-
   return fitted;
 }
-
 // =======================
-// 워크스페이스 샘플링
-// =======================
-function precomputeWorkspace() {
-  workspacePoints = [];
-
-  const step1 = 3; // joint1 샘플 간격 (deg)
-  const step2 = 3; // joint2 샘플 간격 (deg)
-
-  for (let j1 = J1_MIN; j1 <= J1_MAX; j1 += step1) {
-    for (let j2 = J2_MIN; j2 <= J2_MAX; j2 += step2) {
-      const theta1 = (j1 * Math.PI / 180) * -1;
-      const theta2 = (j2 * Math.PI / 180) * -1;
-
-      const theta1_fk = theta1 + upperRestAngle;
-
-      const x2 = baseX + link1Length * Math.cos(theta1_fk);
-      const y2 = baseY + link1Length * Math.sin(theta1_fk);
-
-      const x3 = x2 + link2Length * Math.cos(theta1_fk + theta2);
-      const y3 = y2 + link2Length * Math.sin(theta1_fk + theta2);
-
-      workspacePoints.push({ x: x3, y: y3 });
-    }
-  }
-}
-
-// =======================
-// 점 (x, y)가 각도 제한 내에서 도달 가능한지 판별
-// =======================
-function isReachableSimple(x, y) {
-  const L1 = link1Length;
-  const L2 = link2Length;
-
-  const dx = x - baseX;
-  const dy = y - baseY;
-  const r = Math.hypot(dx, dy);
-
-  if (r > L1 + L2 + 1e-6) return false;
-  if (r < Math.abs(L1 - L2) - 1e-6) return false;
-
-  let cos2 = (r * r - L1 * L1 - L2 * L2) / (2 * L1 * L2);
-  cos2 = Math.max(-1, Math.min(1, cos2));
-
-  const theta2_abs = Math.acos(cos2);
-  const theta2_candidates = [theta2_abs, -theta2_abs];
-
-  for (const theta2_fk of theta2_candidates) {
-    const k1 = L1 + L2 * Math.cos(theta2_fk);
-    const k2 = L2 * Math.sin(theta2_fk);
-
-    const theta1_fk = Math.atan2(dy, dx) - Math.atan2(k2, k1);
-    const theta1 = theta1_fk - upperRestAngle;
-
-    const joint1Deg = -theta1 * 180 / Math.PI;
-    const joint2Deg = -theta2_fk * 180 / Math.PI;
-
-    if (
-      joint1Deg >= J1_MIN &&
-      joint1Deg <= J1_MAX &&
-      joint2Deg >= J2_MIN &&
-      joint2Deg <= J2_MAX
-    ) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-// =======================
-// 종이 영역 안에서 팔이 네 꼭짓점 모두 도달 가능한 최대 정사각형 찾기
-// =======================
-function findMaxSquareInPaper() {
-  if (!paperRect) return null;
-
-  const { x, y, w, h } = paperRect;
-  const cx = x + w / 2;
-  const cy = y + h / 2;
-  const maxPossibleSide = Math.min(w, h);
-
-  let bestSide = 0;
-  const step = 4; // 해상도: 줄이면 더 정확하지만 느려짐
-
-  for (let side = 10; side <= maxPossibleSide; side += step) {
-    const half = side / 2;
-
-    const corners = [
-      { x: cx - half, y: cy - half },
-      { x: cx + half, y: cy - half },
-      { x: cx + half, y: cy + half },
-      { x: cx - half, y: cy + half },
-    ];
-
-    // 1) 네모가 종이 안에 완전히 들어가야 함
-    let insidePaper = corners.every(
-      (p) =>
-        p.x >= x && p.x <= x + w &&
-        p.y >= y && p.y <= y + h
-    );
-    if (!insidePaper) continue;
-
-    // 2) 네 꼭짓점 모두 도달 가능해야 함
-    let allReachable = corners.every((p) => isReachableSimple(p.x, p.y));
-    if (allReachable) {
-      bestSide = side;
-    }
-  }
-
-  if (bestSide > 0) {
-    return { cx, cy, side: bestSide };
-  }
-  return null;
-}
-
-// =======================
-// 2DOF 역기구학
+// 2DOF 역기구학: 타겟 (x, y) -> joint1, joint2 (deg)
 // =======================
 function inverseKinematics2DOF(targetX, targetY, prevJoint1Deg, prevJoint2Deg) {
   const L1 = link1Length;
   const L2 = link2Length;
 
+  // 베이스 기준 좌표
   const dx = targetX - baseX;
   const dy = targetY - baseY;
 
   let d = Math.hypot(dx, dy);
   if (d < 1e-6) d = 1e-6;
 
+  // 작업 공간 내로 클램핑
   const maxReach = L1 + L2 - 1e-3;
   const minReach = Math.abs(L1 - L2) + 1e-3;
   d = Math.max(minReach, Math.min(maxReach, d));
 
+  // cos(theta2_fk)
   let cos2 = (d * d - L1 * L1 - L2 * L2) / (2 * L1 * L2);
   cos2 = Math.max(-1, Math.min(1, cos2));
 
-  const theta2_fk_abs = Math.acos(cos2);
+  const theta2_fk_abs = Math.acos(cos2); // 0 ~ π
 
+  // 두 가지 브랜치: elbow-down / elbow-up
   const theta2_fk_list = [ theta2_fk_abs, -theta2_fk_abs ];
 
   function solveFor(theta2_fk) {
@@ -504,145 +358,113 @@ function inverseKinematics2DOF(targetX, targetY, prevJoint1Deg, prevJoint2Deg) {
 
     const theta1_fk = Math.atan2(dy, dx) - Math.atan2(k2, k1);
 
+    // FK에서 theta1_fk = theta1 + upperRestAngle 였음
     const theta1 = theta1_fk - upperRestAngle;
     const theta2 = theta2_fk;
 
+    // 기존 FK 코드: theta1 = -rad(joint1), theta2 = -rad(joint2)
     const joint1Deg = -theta1 * 180 / Math.PI;
     const joint2Deg = -theta2 * 180 / Math.PI;
 
     return { joint1: joint1Deg, joint2: joint2Deg };
   }
 
-  let best = null;
-  let bestScore = Infinity;
+  const solA = solveFor(theta2_fk_list[0]);
+  const solB = solveFor(theta2_fk_list[1]);
 
+  // 이전 각도가 없으면 (처음 프레임 등) 일단 solA 사용
+  if (typeof prevJoint1Deg !== "number" || typeof prevJoint2Deg !== "number") {
+    return solA;
+  }
+
+  // 두 해 중에서 "이전 각도와 더 가까운" 해 선택
   function score(sol) {
     const d1 = sol.joint1 - prevJoint1Deg;
     const d2 = sol.joint2 - prevJoint2Deg;
     return d1 * d1 + d2 * d2;
   }
 
-  for (const t2 of theta2_fk_list) {
-    const sol = solveFor(t2);
-    const j1 = sol.joint1;
-    const j2 = sol.joint2;
+  let best = solA;
+  let bestScore = score(solA);
+  const scoreB = score(solB);
 
-    if (j1 < J1_MIN || j1 > J1_MAX) continue;
-    if (j2 < J2_MIN || j2 > J2_MAX) continue;
-
-    if (typeof prevJoint1Deg !== "number" || typeof prevJoint2Deg !== "number") {
-      best = sol;
-      bestScore = 0;
-      break;
-    }
-
-    const sc = score(sol);
-    if (sc < bestScore) {
-      best = sol;
-      bestScore = sc;
-    }
+  if (scoreB < bestScore) {
+    best = solB;
+    bestScore = scoreB;
   }
 
-  if (!best) {
-    return {
-      reachable: false,
-      joint1: prevJoint1Deg,
-      joint2: prevJoint2Deg,
-    };
+  // (옵션) joint2 부호 제한 걸고 싶으면 여기서 필터링 가능
+  // 예: 항상 joint2 >= 0 인 해만 쓰고 싶다면:
+  /*
+  const candidates = [solA, solB].filter(s => s.joint2 >= 0);
+  if (candidates.length > 0) {
+    // 그 중에서 prev와 가장 가까운 해 선택
+    let cBest = candidates[0];
+    let cScore = score(cBest);
+    for (let i = 1; i < candidates.length; i++) {
+      const sc = score(candidates[i]);
+      if (sc < cScore) {
+        cScore = sc;
+        cBest = candidates[i];
+      }
+    }
+    best = cBest;
   }
+  */
 
-  return {
-    reachable: true,
-    joint1: best.joint1,
-    joint2: best.joint2,
-  };
+  return best;
 }
-
 function trunc1(x) {
   return (x >= 0)
     ? Math.floor(x * 10) / 10
     : Math.ceil(x * 10) / 10;
 }
-
 // =======================
 // pdraw
 // =======================
 let debugFrame = 0;
 function pdraw(p) {
-  debugFrame++;
-  
+    debugFrame++;
+    
   p.background(245);
   p.scale(scale);
 
-  // 🔵 워크스페이스
-  if (workspacePoints.length > 0) {
-    p.push();
-    p.stroke(0, 150, 255, 80);
-    p.strokeWeight(2);
-    for (const wp of workspacePoints) {
-      p.point(wp.x, wp.y);
-    }
-    p.pop();
-  }
-
-  // 🔵 종이 영역(= SVG bbox)
-  if (paperRect) {
-    p.push();
-    p.noFill();
-    p.stroke(150);
-    p.strokeWeight(2);
-    p.rect(paperRect.x, paperRect.y, paperRect.w, paperRect.h);
-    p.pop();
-  }
-
-  // 🔵 최대 정사각형
-  if (maxSquare) {
-    p.push();
-    p.noFill();
-    p.stroke(0, 200, 0);
-    p.strokeWeight(3);
-    p.rectMode(p.CENTER);
-    p.rect(maxSquare.cx, maxSquare.cy, maxSquare.side, maxSquare.side);
-    p.rectMode(p.CORNER);
-    p.pop();
-  }
-
   // 1) 각도 / 펜 상태 업데이트
-  if (isPlaying) {
-    if (useSvgAsMotion && svgPathPoints.length > 0) {
+if (isPlaying) {
+  if (useSvgAsMotion && svgPathPoints.length > 0) {
 
-      const pt = svgPathPoints[svgIndex];
+    const pt = svgPathPoints[svgIndex];
 
-      const dynamicSkip = (pt.pen === 0 ? 1 : svgFrameSkip);
+    // 🔥 [NEW] 펜 업일 때는 건너뛰지 않고 매 프레임 이동 → 순간이동 제거
+    const dynamicSkip = (pt.pen === 0 ? 1 : svgFrameSkip);
 
-      svgFrameCounter++;
-      if (svgFrameCounter >= dynamicSkip) {
-        svgFrameCounter = 0;
-        svgIndex++;
-        if (svgIndex >= svgPathPoints.length) {
-          svgIndex = svgPathPoints.length - 1;
-        }
-      }
-
-      const ik = inverseKinematics2DOF(
-        pt.x,
-        pt.y,
-        currentAngleJoint1,
-        currentAngleJoint2
-      );
-      
-      if (ik.reachable) {
-        let j1 = trunc1(ik.joint1);
-        let j2 = trunc1(ik.joint2);
-
-        currentAngleJoint1 = j1;
-        currentAngleJoint2 = j2;
-        currentPen = pt.pen;
-      } else {
-        currentPen = 0;
+    svgFrameCounter++;
+    if (svgFrameCounter >= dynamicSkip) {
+      svgFrameCounter = 0;
+      svgIndex++;
+      if (svgIndex >= svgPathPoints.length) {
+        svgIndex = svgPathPoints.length - 1;
       }
     }
+
+    // IK 계산 (이전 각도 사용을 강력 추천하면 이렇게)
+    const ik = inverseKinematics2DOF(
+      pt.x,
+      pt.y,
+      currentAngleJoint1,
+      currentAngleJoint2
+    );
+    
+    let j1 = trunc1(ik.joint1);
+    let j2 = trunc1(ik.joint2);
+    // 범위 내에 있는지 검사
+    j1 = Math.max(J1_MIN, Math.min(J1_MAX, j1));
+    j2 = Math.max(J2_MIN, Math.min(J2_MAX, j2));    
+    currentAngleJoint1 = j1;
+    currentAngleJoint2 = j2;
+    currentPen = pt.pen;
   }
+}
 
   // 관절 각도(도 → 라디안, 부호 보정)
   const theta1 = p.radians(currentAngleJoint1) * -1;
@@ -651,7 +473,7 @@ function pdraw(p) {
   // upperarm 기본 기울기 포함한 FK용 각도
   const theta1_fk = theta1 + upperRestAngle;
 
-  // 포워드 키네매틱스
+  // 2. 포워드 키네매틱스: 어깨→팔꿈치→손끝(수학적 엔드이펙터)
   const x2 = baseX + link1Length * p.cos(theta1_fk);
   const y2 = baseY + link1Length * p.sin(theta1_fk);
 
@@ -661,18 +483,21 @@ function pdraw(p) {
   // upper arm 렌더링
   if (imgUpper) {
     p.push();
-    p.translate(baseX, baseY);
-    p.rotate(theta1);
+    p.translate(baseX, baseY); // 어깨 기준
+    p.rotate(theta1);          // joint1 각도만 사용
     p.scale(imageScale);
     p.image(imgUpper, -UPPER_JOINT_BASE_X, -UPPER_JOINT_BASE_Y);
     p.pop();
   }
 
-  // forearm 렌더링
+  // forearm 랜더링
   if (imgFore) {
     p.push();
-    p.translate(x2, y2);
+    p.translate(x2, y2); // 팔꿈치 위치
 
+    // [NEW]
+    // forearm 이미지의 "엘보우→펜" 벡터가
+    // 수학 모델의 (theta1_fk + theta2) 방향과 일치하도록 회전
     const foreRotate = theta1_fk + theta2 - foreRestAngle;
     p.rotate(foreRotate);
 
@@ -681,7 +506,9 @@ function pdraw(p) {
     p.pop();
   }
 
+  // ======================
   // top 렌더링
+  // ======================
   if (imgTop) {
     p.push();
     p.translate(baseX, baseY);
@@ -690,30 +517,36 @@ function pdraw(p) {
     p.pop();
   }
 
-  // 펜 좌표
+  // ======================
+  // 펜 좌표 계산 (이미지 오프셋 기반으로 정확히)
+  // ======================
   const penX = x3;
   const penY = y3;
 
-  // 궤적
-  trailPoints.push({ x: penX, y: penY, pen: currentPen });
+  // ======================
+  // 궤적 (빨간 선) - 펜이 내려가 있을 때만 기록
+  // ======================
+   trailPoints.push({ x: penX, y: penY, pen: currentPen });
+   //if (trailPoints.length > 10000) trailPoints.shift();
 
-  if (trailPoints.length > 1) {
-    p.push();
-    p.stroke(255, 0, 0);
-    p.strokeWeight(2);
-    p.noFill();
+if (trailPoints.length > 1) {
+  p.push();
+  p.stroke(255, 0, 0);
+  p.strokeWeight(2);
+  p.noFill();
 
-    for (let i = 1; i < trailPoints.length; i++) {
-      const prev = trailPoints[i - 1];
-      const curr = trailPoints[i];
+  for (let i = 1; i < trailPoints.length; i++) {
+    const prev = trailPoints[i - 1];
+    const curr = trailPoints[i];
 
-      if (prev.pen === 1 && curr.pen === 1) {
-        p.line(prev.x, prev.y, curr.x, curr.y);
-      }
+    // 🔥 이전 점과 현재 점이 둘 다 펜 다운일 때만 선을 그림
+    if (prev.pen === 1 && curr.pen === 1) {
+      p.line(prev.x, prev.y, curr.x, curr.y);
     }
-
-    p.pop();
   }
+
+  p.pop();
+}
 
   // 펜 위치 표시
   p.push();
@@ -722,12 +555,23 @@ function pdraw(p) {
   p.ellipse(penX, penY, 20, 20);
   p.pop();
 
+  // (옵션) IK가 맞추는 수학적 엔드이펙터 위치 디버그용 점
+  // p.push();
+  // p.fill(0, 255, 0);
+  // p.noStroke();
+  // p.ellipse(x3, y3, 8, 8);
+  // p.pop();
+
+  // ======================
   // 디버그 텍스트
-  if (debugFrame > 5) {
-    minJoint1 = Math.min(minJoint1, currentAngleJoint1);
-    maxJoint1 = Math.max(maxJoint1, currentAngleJoint1);
-    minJoint2 = Math.min(minJoint2, currentAngleJoint2);
-    maxJoint2 = Math.max(maxJoint2, currentAngleJoint2);   
+  // ======================
+ 
+  
+  if(debugFrame>5){
+     minJoint1 = Math.min(minJoint1, currentAngleJoint1);
+  maxJoint1 = Math.max(maxJoint1, currentAngleJoint1);
+  minJoint2 = Math.min(minJoint2, currentAngleJoint2);
+  maxJoint2 = Math.max(maxJoint2, currentAngleJoint2);   
   }
  
   p.push();
@@ -737,6 +581,7 @@ function pdraw(p) {
   p.text(`J2: ${currentAngleJoint2.toFixed(1)} deg`, 50, 70);
   p.text(`L1: ${link1Length.toFixed(0)}px`, 50, 90);
   p.text(`L2: ${link2Length.toFixed(0)}px`, 50, 110);
+
   p.text(isPlaying ? "Playing" : "Paused", 50, 150);
   p.text(`Pen: ${currentPen}`, 50, 170);
   p.text(`SVG pts: ${svgPathPoints.length}`, 50, 190);
@@ -746,17 +591,18 @@ function pdraw(p) {
   p.text(`MAX JOINT1: ${maxJoint1} deg`, 50, 270);
   p.text(`MIN JOINT2: ${minJoint2} deg`, 50, 290);
   p.text(`MAX JOINT2: ${maxJoint2} deg`, 50, 310);
-  p.text(`MAX SQUARE: ${maxSquare ? maxSquare.side.toFixed(1) : 0} px`, 50, 330);
   p.pop();
 
-  // SVG 원본 궤적 (파란 선)
+  // ======================
+  // SVG 원본 궤적 (파란 선) - 이미 로봇 좌표계
+  // ======================
   if (showSvgPath) {
     drawSvgPathPoints(p);
   }
 }
 
 // =======================
-// SVG 궤적 그리기
+// SVG (x,y,pen) 궤적 그리기 (파란 선)
 // =======================
 function drawSvgPathPoints(p) {
   if (!svgPathPoints || svgPathPoints.length < 2) return;
