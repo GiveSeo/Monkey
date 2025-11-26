@@ -14,8 +14,8 @@ function sketch() { // 화면에 시뮬레이터 띄우는 함수
 
 let STEP = 2;
 // 전역 변수
-let FILENAME = "sqaure.svg"
-let draw_scale = 0.5
+let FILENAME = "Turtle.svg"
+let draw_scale = 0.4
 let svgPathPoints = []; // 최종: 로봇 좌표계 (x,y,pen)
 let showSvgPath = false; // 파란 선 표시 여부
 let Xoffset = -140;
