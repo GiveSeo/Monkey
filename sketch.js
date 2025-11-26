@@ -1,9 +1,3 @@
-/****************************************************
- * 2DOF 로봇 시뮬레이터 (top + upperarm + forearm)
- * 이미지 크기에 맞게 자동 조정 + 각도 리스트 재생
- * + SVG <path> 궤적 겹쳐보기 + SVG 기반 IK 모션
- ****************************************************/
-
 function sketch() { // 화면에 시뮬레이터 띄우는 함수
   pop_sketch();
 
@@ -18,9 +12,8 @@ function sketch() { // 화면에 시뮬레이터 띄우는 함수
   }, "p5-canvas");
 }
 
-// =======================
-// SVG 관련
-// =======================
+let STEP = 2;
+// 전역 변수
 let FILENAME = "sqaure.svg"
 let draw_scale = 0.5
 let svgPathPoints = []; // 최종: 로봇 좌표계 (x,y,pen)
@@ -40,8 +33,8 @@ let svgFrameSkip = 2;      // 숫자 줄이면 더 빨리 따라감
 let svgFrameCounter = 0;
 
 
-// SVG에서 <path>만 파싱해서 (x,y,pen) 리스트로 뽑는 함수
 
+// SVG에서 DOM으로 파싱해서 PATH만 가져오기
   function extractPathPointsFromSvg(svgText, sampleStep = 2) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgText, "image/svg+xml");
@@ -105,8 +98,7 @@ let svgFrameCounter = 0;
 
     if (localPoints.length === 0) return;
 
-    // 🔥 여기서 "이전 path 마지막 점"과 "이번 path 첫 점" 사이를 보간해서
-    //    순간이동을 없앤다. (pen=0으로만 채워서 선은 안 그림)
+    //path -> path시 로봇 팔 움직이게 하는 임의 점 넣기
     if (lastGlobalPt !== null) {
       const start = lastGlobalPt;
       const end = localPoints[0];
@@ -124,7 +116,7 @@ let svgFrameCounter = 0;
         points.push({
           x: start.x + dx * t,
           y: start.y + dy * t,
-          pen: 0, // 이동만, 그림 X
+          pen: 0, 
         });
       }
     }
@@ -142,9 +134,7 @@ let svgFrameCounter = 0;
   return points;
 }
 
-// =======================
-// 로봇 / 이미지 전역
-// =======================
+// 로봇, 이미지 전역 변수
 let canvasWidth, canvasHeight;
 
 let baseX, baseY;
@@ -165,12 +155,15 @@ const scale = 0.7;       // 전체 캔버스 스케일
 const moreHeight = 100;
 const imageScale = 0.5;  // png 이미지 자체 스케일
 
+const J1_MIN = -30;
+const J1_MAX =  180;
+const J2_MIN =  -180;
+const J2_MAX =  180;
+
 // upperarm 이미지의 기본 기울기(어깨→팔꿈치)
 
 
-// =======================
-// 이미지 내부 관절 좌표 (픽셀)
-// =======================
+// 이미지 픽셀 정보
 const TOP_JOINT_X = 746;
 const TOP_JOINT_Y = 232;
 
@@ -184,28 +177,12 @@ const FORE_JOINT_ELBOW_Y = 375;
 const FORE_PEN_X         = 192;
 const FORE_PEN_Y         = 146;
 
-// =======================
-// angleSequence (백업용 / 테스트용)
-// =======================
-let angleSequence = [
-  { joint1: 0,  joint2: 0,  duration: 100, pen: 0 },
-  { joint1: 30, joint2: 20, duration: 100, pen: 1 },
-  { joint1: 60, joint2: 40, duration: 100, pen: 1 },
-  { joint1: 90, joint2: 30, duration: 100, pen: 1 },
-  { joint1: 60, joint2: 50, duration: 100, pen: 1 },
-  { joint1: 30, joint2: 60, duration: 100, pen: 1 },
-  { joint1: 0,  joint2: 0,  duration: 100, pen: 0 },
-];
-
 let sequenceIndex = 0;
 let frameCounter = 0;
 let currentDuration = 0;
 let isPlaying = true;
 let trailPoints = [];
 
-// =======================
-// 팝업 생성
-// =======================
 function pop_sketch() {
   const option = {
     title: "2DOF Robot Simulator",
@@ -221,33 +198,9 @@ function pop_sketch() {
 
   w2custompopup.open(option);
 
-  setTimeout(() => {
-    const playBtn = document.getElementById("playBtn");
-    const pauseBtn = document.getElementById("pauseBtn");
-    const resetBtn = document.getElementById("resetBtn");
-    const clearTrailBtn = document.getElementById("clearTrailBtn");
-
-    if (playBtn) playBtn.onclick = () => { isPlaying = true; };
-    if (pauseBtn) pauseBtn.onclick = () => { isPlaying = false; };
-    if (resetBtn) {
-      resetBtn.onclick = () => {
-        sequenceIndex = 0;
-        frameCounter = 0;
-        currentAngleJoint1 = 0;
-        currentAngleJoint2 = 0;
-        currentPen = 0;
-        trailPoints = [];
-        svgIndex = 0;
-        svgFrameCounter = 0;
-      };
-    }
-    if (clearTrailBtn) clearTrailBtn.onclick = () => { trailPoints = []; };
-  }, 100);
 }
 
-// =======================
 // psetup
-// =======================
 function psetup(p) {
   canvasWidth = 1200 * scale + 400;
   canvasHeight = 800 * scale + moreHeight;
@@ -303,7 +256,7 @@ function psetup(p) {
   const svgPath = spine.images.get(FILENAME); // Spine에 등록된 SVG 경로
   p.loadStrings(svgPath, (lines) => {
     const svgText = lines.join("\n");
-    const rawPoints = extractPathPointsFromSvg(svgText, 2);
+    const rawPoints = extractPathPointsFromSvg(svgText, STEP);
     console.log("SVG raw path points:", rawPoints.length);
     svgPathPoints = fitSvgPointsToWorkspace(rawPoints); // 로봇 작업 영역 안으로 매핑
     console.log("SVG fitted path points:", svgPathPoints.length);
@@ -461,10 +414,18 @@ function inverseKinematics2DOF(targetX, targetY, prevJoint1Deg, prevJoint2Deg) {
 
   return best;
 }
+function trunc1(x) {
+  return (x >= 0)
+    ? Math.floor(x * 10) / 10
+    : Math.ceil(x * 10) / 10;
+}
 // =======================
 // pdraw
 // =======================
+let debugFrame = 0;
 function pdraw(p) {
+    debugFrame++;
+    
   p.background(245);
   p.scale(scale);
 
@@ -493,9 +454,14 @@ if (isPlaying) {
       currentAngleJoint1,
       currentAngleJoint2
     );
-
-    currentAngleJoint1 = ik.joint1;
-    currentAngleJoint2 = ik.joint2;
+    
+    let j1 = trunc1(ik.joint1);
+    let j2 = trunc1(ik.joint2);
+    // 범위 내에 있는지 검사
+    j1 = Math.max(J1_MIN, Math.min(J1_MAX, j1));
+    j2 = Math.max(J2_MIN, Math.min(J2_MAX, j2));    
+    currentAngleJoint1 = j1;
+    currentAngleJoint2 = j2;
     currentPen = pt.pen;
   }
 }
@@ -514,9 +480,7 @@ if (isPlaying) {
   const x3 = x2 + link2Length * p.cos(theta1_fk + theta2);
   const y3 = y2 + link2Length * p.sin(theta1_fk + theta2);
 
-  // ======================
-  // upperarm 렌더링
-  // ======================
+  // upper arm 렌더링
   if (imgUpper) {
     p.push();
     p.translate(baseX, baseY); // 어깨 기준
@@ -526,9 +490,7 @@ if (isPlaying) {
     p.pop();
   }
 
-  // ======================
-  // forearm 렌더링
-  // ======================
+  // forearm 랜더링
   if (imgFore) {
     p.push();
     p.translate(x2, y2); // 팔꿈치 위치
@@ -603,10 +565,15 @@ if (trailPoints.length > 1) {
   // ======================
   // 디버그 텍스트
   // ======================
-  minJoint1 = Math.min(minJoint1, currentAngleJoint1);
+ 
+  
+  if(debugFrame>5){
+     minJoint1 = Math.min(minJoint1, currentAngleJoint1);
   maxJoint1 = Math.max(maxJoint1, currentAngleJoint1);
   minJoint2 = Math.min(minJoint2, currentAngleJoint2);
-  maxJoint2 = Math.max(maxJoint2, currentAngleJoint2);
+  maxJoint2 = Math.max(maxJoint2, currentAngleJoint2);   
+  }
+ 
   p.push();
   p.fill(0);
   p.textSize(12);
@@ -614,7 +581,7 @@ if (trailPoints.length > 1) {
   p.text(`J2: ${currentAngleJoint2.toFixed(1)} deg`, 50, 70);
   p.text(`L1: ${link1Length.toFixed(0)}px`, 50, 90);
   p.text(`L2: ${link2Length.toFixed(0)}px`, 50, 110);
-  p.text(`Seq: ${sequenceIndex + 1} / ${angleSequence.length}`, 50, 130);
+
   p.text(isPlaying ? "Playing" : "Paused", 50, 150);
   p.text(`Pen: ${currentPen}`, 50, 170);
   p.text(`SVG pts: ${svgPathPoints.length}`, 50, 190);
@@ -623,7 +590,7 @@ if (trailPoints.length > 1) {
   p.text(`MIN JOINT1: ${minJoint1} deg`, 50, 250);
   p.text(`MAX JOINT1: ${maxJoint1} deg`, 50, 270);
   p.text(`MIN JOINT2: ${minJoint2} deg`, 50, 290);
-  p.text(`MAX JOINT1: ${maxJoint2} deg`, 50, 310);
+  p.text(`MAX JOINT2: ${maxJoint2} deg`, 50, 310);
   p.pop();
 
   // ======================
