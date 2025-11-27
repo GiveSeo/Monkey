@@ -16,13 +16,13 @@ let drawScale     = 0.4;   // SVG → 로봇 스케일
 let svgPathPoints = [];    // 최종: 로봇 좌표계 (x, y, pen)
 let showSvgPath   = false; // 파란선 표시 여부
 
-//svg offset
+// scale x,y offset
 let Xoffset = -140;
 let Yoffset = +50;
 
 // 이미지 기준 기본 각도
-let upperRestAngle = 0; // upperarm 이미지에서 어깨→팔꿈치 방향(rad)
-let foreRestAngle  = 0; // forearm 이미지에서 팔꿈치→펜 방향(rad)
+let upperRestAngle = 0; // upperarm 이미지 기울어진 각도
+let foreRestAngle  = 0; // forearm 이미지 기울어진 각도
 
 // SVG를 모션 기준으로 쓸지 여부 + 인덱스/속도
 let useSvgAsMotion = true;
@@ -33,7 +33,7 @@ let svgFrameCounter = 0;
 // 로봇 관련 전역 변수
 let canvasWidth, canvasHeight;
 
-let baseX, baseY;       // 어깨(Joint 1) 위치
+let baseX, baseY;       // Joint 1 x,y 좌표
 let link1Length, link2Length;
 
 let imgTop, imgUpper, imgFore;
@@ -65,7 +65,7 @@ const J1_MAX = monkey.maxJoint1;
 const J2_MIN = monkey.minJoint2;
 const J2_MAX = monkey.maxJoint2;
 
-// 이미지 픽셀 기준 조인트/펜 위치
+// 이미지 기준 팔 관절 픽셀 좌표 (길이 구하거나, 각도 측정시 필요)
 const TOP_JOINT_X = 746;
 const TOP_JOINT_Y = 232;
 
@@ -84,9 +84,7 @@ let isPlaying      = true;
 let trailPoints    = [];
 let debugFrame     = 0;
 
-// =======================
-// 팝업 열기
-// =======================
+// 팝업 함수
 function openRobotPopup() {
   const option = {
     title: "2DOF Robot Simulator",
@@ -99,9 +97,7 @@ function openRobotPopup() {
   w2custompopup.open(option);
 }
 
-// =======================
-// p5 setup
-// =======================
+// p5 setup 함수
 function setupSimulator(p) {
   canvasWidth  = 1200 * scale + 400;
   canvasHeight = 800 * scale + moreHeight;
@@ -136,9 +132,9 @@ function setupSimulator(p) {
   p.createCanvas(canvasWidth, canvasHeight);
 }
 
-// 링크 길이 / 기준 각도 계산
+// 팔 길이, 각도 계산
 function initLinkGeometry() {
-  // link1: upperarm (어깨 → 팔꿈치)
+  // upperarm 길이 각도
   {
     const dx = (UPPER_JOINT_ELBOW_X - UPPER_JOINT_BASE_X) * imageScale;
     const dy = (UPPER_JOINT_ELBOW_Y - UPPER_JOINT_BASE_Y) * imageScale;
@@ -149,7 +145,7 @@ function initLinkGeometry() {
     upperRestAngle = Math.atan2(dyImg, dxImg); // 이미지 상의 방향(rad)
   }
 
-  // link2: forearm (팔꿈치 → 펜)
+  // forearm 길이 각도
   {
     const dx = (FORE_PEN_X - FORE_JOINT_ELBOW_X) * imageScale;
     const dy = (FORE_PEN_Y - FORE_JOINT_ELBOW_Y) * imageScale;
@@ -175,9 +171,7 @@ function initBasePosition() {
   }
 }
 
-// =======================
-// SVG → 점 목록 추출 (Transform, use, 기본 도형 지원)
-// =======================
+// svg에서 path, 기본 도형 좌표 추출 함수
 function extractPathPointsFromSvg(svgText, sampleStep = 2) {
   const parser  = new DOMParser();
   const doc     = parser.parseFromString(svgText, "image/svg+xml");
@@ -537,9 +531,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
   return points;
 }
 
-// =======================
-// SVG 포인트를 로봇 작업영역으로 매핑
-// =======================
+// svg에서 추출한 좌표 scale 함수
 function fitSvgPointsToWorkspace(points) {
   if (!points || !points.length) return [];
 
@@ -565,7 +557,7 @@ function fitSvgPointsToWorkspace(points) {
     const dy = p.y - cy;
     maxR = Math.max(maxR, Math.hypot(dx, dy));
   }
-  // 중심 기준 배율
+  // 점이 하나이거나 두 점 사이가 매우 가까우면 1로 봄.
   if (maxR < 1e-6) maxR = 1.0;
 
   // 3) 로봇 작업반경
@@ -589,9 +581,7 @@ function fitSvgPointsToWorkspace(points) {
   });
 }
 
-// =======================
-// 2DOF 역기구학 (targetX, targetY → joint1, joint2 in deg) , 현재 x y, 이전 deg1,
-// =======================
+// 2DOF 역기구학 함수
 function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
   const L1 = link1Length;
   const L2 = link2Length;
@@ -645,16 +635,14 @@ function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
   return (scoreB < scoreA) ? solB : solA;
 }
 
-// 0.1도 단위로 자르기
+// 펄스 단위가 0.1도이므로, 소수점 첫째 이하는 버림
 function trunc1(x) {
   return x >= 0
     ? Math.floor(x * 10) / 10
     : Math.ceil(x * 10) / 10;
 }
 
-// =======================
-// p5 draw
-// =======================
+//p5 draw 함수
 function drawSimulator(p) {
   debugFrame++;
 
@@ -777,7 +765,7 @@ function drawSimulator(p) {
 
   trailPoints.push({ x: penX, y: penY, pen: currentPen });
 
-  // 빨간 궤적 그리기 (펜 다운 구간만)
+  // 펜이 다운이면 궤적을 그림
   if (trailPoints.length > 1) {
     p.push();
     p.stroke(255, 0, 0);
@@ -801,7 +789,7 @@ function drawSimulator(p) {
   p.ellipse(penX, penY, 20, 20);
   p.pop();
 
-  // 7) 관절 범위 기록(몇 프레임 지나고부터)
+  // 7) 관절 범위 기록
   if (debugFrame > 5) {
     minJoint1 = Math.min(minJoint1, currentAngleJoint1);
     maxJoint1 = Math.max(maxJoint1, currentAngleJoint1);
@@ -837,9 +825,7 @@ function drawSimulator(p) {
   }
 }
 
-// =======================
-// SVG 궤적(파란 선) 그리기
-// =======================
+// 파란 선 (궤적) 원본 궤적 그리기
 function drawSvgPathPoints(p) {
   if (!svgPathPoints || svgPathPoints.length < 2) return;
 
