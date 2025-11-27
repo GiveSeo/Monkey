@@ -18,7 +18,7 @@ function sketch() { // 화면에 시뮬레이터 띄우는 함수
 
 
 let zeroPoseFrames = 60; 
-
+let pixel_per_mm;
 // 🔵 기본 스케일 + 팔 길이 배율
 const baseImageScale = 0.5;
 const baseDrawScale  = 0.5;
@@ -62,7 +62,7 @@ const scale = 0.7;
 const moreHeight = 100;
 
 const J1_MIN = -30;
-const J1_MAX =  180;
+const J1_MAX =  100;
 const J2_MIN =  40;
 const J2_MAX =  160;
 
@@ -127,6 +127,7 @@ function psetup(p) {
     const dy1 = (UPPER_JOINT_ELBOW_Y - UPPER_JOINT_BASE_Y) * imageScale;
     link1Length = Math.hypot(dx1, dy1);
   }
+  pixel_per_mm = link1Length / 73;
 
   // upperarm 기본 기울기
   {
@@ -779,6 +780,7 @@ function pdraw(p) {
   p.ellipse(penX, penY, 20, 20);
   p.pop();
 
+  // 디버그 텍스트
   p.push();
   p.fill(0);
   p.textSize(12);
@@ -786,11 +788,18 @@ function pdraw(p) {
   p.text(`J2: ${currentAngleJoint2.toFixed(1)} deg`, 50, 70);
   p.text(`L1: ${link1Length.toFixed(0)}px`, 50, 90);
   p.text(`L2: ${link2Length.toFixed(0)}px`, 50, 110);
+  p.text(`1 mm per ${pixel_per_mm.toFixed(1)} pixel`,50,130);
   p.text(isPlaying ? "Playing" : "Completed", 50, 150);
   p.text(`Pen: ${currentPen}`, 50, 170);
   p.text(`Fill pts: ${fillPoints.length}`, 50, 190);
   p.text(`Fill idx: ${fillIndex}`, 50, 210);
-  p.text(`MAX RECT: ${maxSquare ? maxSquare.width.toFixed(0) : 0}x${maxSquare ? maxSquare.height.toFixed(0) : 0} px`, 50, 310);
-  p.text(`AREA: ${maxSquare ? (maxSquare.width * maxSquare.height).toFixed(0) : 0} px²`, 50, 330);
+  const rectW_mm = maxSquare ? (maxSquare.width / pixel_per_mm) : 0;
+  const rectH_mm = maxSquare ? (maxSquare.height / pixel_per_mm) : 0;
+
+// mm² 단위 면적
+  const area_mm2 = maxSquare ? ((maxSquare.width * maxSquare.height) / (pixel_per_mm * pixel_per_mm)) : 0;
+
+  p.text(`MAX RECT: ${rectW_mm.toFixed(1)} x ${rectH_mm.toFixed(1)} mm`, 50, 310);
+  p.text(`AREA: ${area_mm2.toFixed(1)} mm²`, 50, 330);
   p.pop();
 }
