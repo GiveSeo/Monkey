@@ -16,8 +16,6 @@ function sketch() { // 화면에 시뮬레이터 띄우는 함수
 // 전역 변수
 // =======================
 
-let STEP = 2;
-let FILENAME = "Cat.svg";
 
 let zeroPoseFrames = 60; 
 
@@ -29,9 +27,7 @@ let armScale = 1.0;
 let draw_scale  = baseDrawScale  * armScale;
 let imageScale  = baseImageScale * armScale;
 
-let svgPathPoints = []; // 사용하지 않음
 let workspacePoints = [];
-let showSvgPath = false;
 let Xoffset = -140;
 let Yoffset = +50;
 
@@ -84,9 +80,7 @@ const FORE_JOINT_ELBOW_Y = 375;
 const FORE_PEN_X         = 192;
 const FORE_PEN_Y         = 146;
 
-let sequenceIndex = 0;
-let frameCounter = 0;
-let currentDuration = 0;
+
 let isPlaying = true;
 let trailPoints = [];
 
@@ -631,8 +625,6 @@ function trunc1(x) {
 // =======================
 let debugFrame = 0;
 function pdraw(p) {
-  debugFrame++;
-  
   p.background(245);
   p.scale(scale);
 
@@ -787,14 +779,6 @@ function pdraw(p) {
   p.ellipse(penX, penY, 20, 20);
   p.pop();
 
-  // 디버그 텍스트
-  if (debugFrame > 5) {
-    minJoint1 = Math.min(minJoint1, currentAngleJoint1);
-    maxJoint1 = Math.max(maxJoint1, currentAngleJoint1);
-    minJoint2 = Math.min(minJoint2, currentAngleJoint2);
-    maxJoint2 = Math.max(maxJoint2, currentAngleJoint2);   
-  }
- 
   p.push();
   p.fill(0);
   p.textSize(12);
@@ -806,10 +790,6 @@ function pdraw(p) {
   p.text(`Pen: ${currentPen}`, 50, 170);
   p.text(`Fill pts: ${fillPoints.length}`, 50, 190);
   p.text(`Fill idx: ${fillIndex}`, 50, 210);
-  p.text(`MIN JOINT1: ${minJoint1.toFixed(1)} deg`, 50, 230);
-  p.text(`MAX JOINT1: ${maxJoint1.toFixed(1)} deg`, 50, 250);
-  p.text(`MIN JOINT2: ${minJoint2.toFixed(1)} deg`, 50, 270);
-  p.text(`MAX JOINT2: ${maxJoint2.toFixed(1)} deg`, 50, 290);
   p.text(`MAX RECT: ${maxSquare ? maxSquare.width.toFixed(0) : 0}x${maxSquare ? maxSquare.height.toFixed(0) : 0} px`, 50, 310);
   p.text(`AREA: ${maxSquare ? (maxSquare.width * maxSquare.height).toFixed(0) : 0} px²`, 50, 330);
   p.pop();
