@@ -9,14 +9,14 @@ function sketch() {
 
 // 전역 변수
 let STEP          = 2;
-let FILENAME      = "input.svg";
+let FILENAME      = "Cat.svg";
 let drawScale     = 0.4;   // SVG → 로봇 스케일
 let svgPathPoints = [];    // 최종: 로봇 좌표계 (x, y, pen)
 let showSvgPath   = false; // 파란선 표시 여부
 
 // scale x,y offset
-let Xoffset = -140;
-let Yoffset = +50;
+let Xoffset = +140;
+let Yoffset = -50;
 
 // 이미지 기준 기본 각도
 let upperRestAngle = 0; // upperarm 이미지 기울어진 각도
@@ -64,18 +64,18 @@ const J2_MIN = monkey.minJoint2;
 const J2_MAX = monkey.maxJoint2;
 
 // 이미지 기준 팔 관절 픽셀 좌표 (길이 구하거나, 각도 측정시 필요)
-const TOP_JOINT_X = 746;
-const TOP_JOINT_Y = 232;
+const TOP_JOINT_X = 220;
+const TOP_JOINT_Y = 477;
 
-const UPPER_JOINT_BASE_X  = 225;
-const UPPER_JOINT_BASE_Y  = 532;
-const UPPER_JOINT_ELBOW_X = 777;
-const UPPER_JOINT_ELBOW_Y = 377;
+const UPPER_JOINT_BASE_X  = 747;
+const UPPER_JOINT_BASE_Y  = 226;
+const UPPER_JOINT_ELBOW_X = 195;
+const UPPER_JOINT_ELBOW_Y = 383;
 
-const FORE_JOINT_ELBOW_X = 778;
-const FORE_JOINT_ELBOW_Y = 375;
-const FORE_PEN_X         = 192;
-const FORE_PEN_Y         = 146;
+const FORE_JOINT_ELBOW_X = 195;
+const FORE_JOINT_ELBOW_Y = 385;
+const FORE_PEN_X         = 778;
+const FORE_PEN_Y         = 612;
 
 // 재생 관련 상태
 let isPlaying      = true;
@@ -102,9 +102,9 @@ function setupSimulator(p) {
 
    p.frameRate(100);
   // Spine에서 이미지 경로 얻기
-  topPath   = spine.images.get("top.png");
-  upperPath = spine.images.get("upperarm.png");
-  forePath  = spine.images.get("forearm.png");
+  topPath   = spine.images.get("top_reverse.png");
+  upperPath = spine.images.get("upperarm_reverse.png");
+  forePath  = spine.images.get("forearm_reverse.png");
 
   // p5 이미지 로딩
   imgTop   = p.loadImage(topPath);
@@ -158,17 +158,17 @@ function initLinkGeometry() {
 // 베이스 위치 계산
 function initBasePosition() {
   baseX = 800;
-  const groundY = canvasHeight - 50;
+
+  const topMargin = 80; // 화면 위에서 조금 내려온 위치
 
   if (imgTop) {
-    const topH          = imgTop.height * imageScale;
-    const jointToBottom = topH - TOP_JOINT_Y * imageScale;
-    baseY = groundY - jointToBottom;
+    const jointFromTop = TOP_JOINT_Y * imageScale;
+    // 이미지의 위쪽에서 관절까지 거리만큼 내려오기
+    baseY = topMargin + jointFromTop;
   } else {
-    baseY = groundY - 100;
+    baseY = topMargin + 100;
   }
 }
-
 // svg에서 path, 기본 도형 좌표 추출 함수
 function extractPathPointsFromSvg(svgText, sampleStep = 2) {
   const parser  = new DOMParser();
@@ -533,11 +533,10 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
 function fitSvgPointsToWorkspace(points) {
   if (!points || !points.length) return [];
 
-  // 1) bounding box
+  // 1) SVG 원본 좌표의 bounding box 계산
   let minX = Infinity, maxX = -Infinity;
   let minY = Infinity, maxY = -Infinity;
 
-  // 최대 최소 점 찾기
   for (const p of points) {
     minX = Math.min(minX, p.x);
     maxX = Math.max(maxX, p.x);
@@ -545,36 +544,39 @@ function fitSvgPointsToWorkspace(points) {
     maxY = Math.max(maxY, p.y);
   }
 
+  // 2) SVG 중심점 (cx, cy)
   const cx = (minX + maxX) / 2;
   const cy = (minY + maxY) / 2;
 
-  // 2) 중심 기준 최대 반경
+  // 3) 중심 기준 최대 반경 (가장 멀리 있는 점까지의 거리)
   let maxR = 0;
   for (const p of points) {
     const dx = p.x - cx;
     const dy = p.y - cy;
     maxR = Math.max(maxR, Math.hypot(dx, dy));
   }
-  // 점이 하나이거나 두 점 사이가 매우 가까우면 1로 봄.
+  // 점이 거의 한 점에 몰려 있으면 1로 처리 (0으로 나누기 방지)
   if (maxR < 1e-6) maxR = 1.0;
 
-  // 3) 로봇 작업반경
-  const Lsum      = link1Length + link2Length;
-  const maxReach  = Lsum * 0.9;
-  const scaleSvg  = (maxReach * drawScale) / maxR;
+  // 4) 로봇 작업반경 기준 스케일 계산
+  const Lsum     = link1Length + link2Length;   // 이론상 최대 팔 길이 합
+  const maxReach = Lsum * 0.9;                  // 살짝 여유있게 90%만 사용
+  const scaleSvg = (maxReach * drawScale) / maxR;
 
-  // 4) 그림 중심을 베이스 위쪽에 배치
+  // 5) 그림 중심을 "베이스 아래쪽"에 배치 (천장 로봇)
+  //    p5 좌표계는 y가 아래로 증가하므로, baseY보다 큰 값이 아래쪽.
   const drawCx = baseX;
-  const drawCy = baseY - Lsum * 0.6;
+  const drawCy = baseY + Lsum * 0.6;
 
-  // 5) 스케일 + 평행이동 적용
+  // 6) 스케일 + 평행이동 + 유저 오프셋(Xoffset, Yoffset) 적용
   return points.map((p) => {
     const dx = (p.x - cx) * scaleSvg + Xoffset;
     const dy = (p.y - cy) * scaleSvg + Yoffset;
+
     return {
       x: drawCx + dx,
       y: drawCy + dy,
-      pen: p.pen,
+      pen: p.pen,   // 펜 업/다운 정보는 그대로 유지
     };
   });
 }
@@ -589,10 +591,10 @@ function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
   let d    = Math.hypot(dx, dy);
   if (d < 1e-6) d = 1e-6;
 
-  // 작업공간까지 클램핑
+  // 작업공간까지
   const maxReach = L1 + L2 - 1e-3;
   const minReach = Math.abs(L1 - L2) + 1e-3;
-  d = Math.max(minReach, Math.min(maxReach, d));
+   // d = Math.max(minReach, Math.min(maxReach, d));
 
   let cos2 = (d * d - L1 * L1 - L2 * L2) / (2 * L1 * L2);
   cos2     = Math.max(-1, Math.min(1, cos2));
