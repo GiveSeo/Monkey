@@ -512,10 +512,10 @@ const scale = 0.7;       // 전체 캔버스 스케일
 const moreHeight = 100;
 const imageScale = 0.5;  // png 이미지 자체 스케일
 
-const J1_MIN = -30;
-const J1_MAX =  180;
-const J2_MIN =  -180;
-const J2_MAX =  180;
+const J1_MIN = monkey.minJoint1;
+const J1_MAX = monkey.maxJoint1;
+const J2_MIN = monkey.minJoint2;
+const J2_MAX = monkey.maxJoint2;
 
 // upperarm 이미지의 기본 기울기(어깨→팔꿈치)
 

@@ -61,10 +61,10 @@ let maxJoint2 = -1e9;
 const scale = 0.7;
 const moreHeight = 100;
 
-const J1_MIN = -30;
-const J1_MAX =  100;
-const J2_MIN =  40;
-const J2_MAX =  160;
+const J1_MIN = monkey.minJoint1;
+const J1_MAX = monkey.maxJoint1;
+const J2_MIN = monkey.minJoint2;
+const J2_MAX = monkey.maxJoint2;
 
 // 이미지 픽셀 정보
 const TOP_JOINT_X = 746;
@@ -780,7 +780,7 @@ function pdraw(p) {
   p.ellipse(penX, penY, 20, 20);
   p.pop();
 
-  // 디버그 텍스트
+  // 디버그 텍스트 (필요한 것만 남김)
   p.push();
   p.fill(0);
   p.textSize(12);

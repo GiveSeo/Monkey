@@ -1,8 +1,8 @@
 class Monkey{
-    #minEncoderJoint1 = -120;
-    #maxEncoderJoint1 = 120;
-    #minEncoderJoint2 = -120;
-    #maxEncoderJoint2 = 120;
+    #minEncoderJoint1 = -30;
+    #maxEncoderJoint1 = 180;
+    #minEncoderJoint2 = 40;
+    #maxEncoderJoint2 = 140;
     #angleSpeedOffset = 10;
     #speedJointOffset = 10;
     // constructor 
@@ -39,7 +39,30 @@ class Monkey{
     set speedJoint2(value) {
         this._speedJoint2 = value / this.#speedJointOffset;
     }
-
+    get minJoint1(){
+        return this.#minEncoderJoint1;
+    }
+    set minJoint1(value){
+        this.#minEncoderJoint1 = value;
+    }
+    get maxJoint1(){
+        return this.#maxEncoderJoint1;
+    }
+    set maxJoint1(value){
+        this.#maxEncoderJoint1 = value;
+    }
+    get minJoint2(){
+        return this.#minEncoderJoint2;
+    }
+    set minJoint2(value){
+        this.#minEncoderJoint2 = value;
+    }
+    get maxJoint2(){
+        return this.#maxEncoderJoint2;
+    }
+    set maxJoint2(value){
+        this.#maxEncoderJoint2 = value;
+    }
     // 각도 기반 이동
     moveByAngle(
     targetAngleJoint1,
