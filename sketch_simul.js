@@ -67,8 +67,8 @@ const moreHeight = 100;
 
 const J1_MIN = -30;
 const J1_MAX =  180;
-const J2_MIN =  0;
-const J2_MAX =  130;
+const J2_MIN =  40;
+const J2_MAX =  160;
 
 // 이미지 픽셀 정보
 const TOP_JOINT_X = 746;
@@ -289,67 +289,222 @@ function isReachableSimple(x, y) {
 // =======================
 // 최대 직사각형 찾기
 // =======================
+// =======================
+// 최대 직사각형 찾기 (최적화 버전)
+// =======================
+// =======================
+// 최대 직사각형 찾기 (최적화 버전)
+// =======================
 function findMaxRectangleInPaper() {
   if (!paperRect) return null;
 
   const { x, y, w, h } = paperRect;
-  const cx = x + w / 2;
-  const cy = y + h / 2;
-
+  
   let bestArea = 0;
   let bestRect = null;
-  const widthStep = 5;
-  const heightStep = 5;
-  const maxGridStep = 8;
-
-  // 가능한 모든 폭/높이 조합 탐색
-  for (let width = 10; width <= w; width += widthStep) {
-    for (let height = 10; height <= h; height += heightStep) {
-      const halfW = width / 2;
-      const halfH = height / 2;
-
-      const corners = [
-        { x: cx - halfW, y: cy - halfH }, // 좌상
-        { x: cx + halfW, y: cy - halfH }, // 우상
-        { x: cx + halfW, y: cy + halfH }, // 우하
-        { x: cx - halfW, y: cy + halfH }, // 좌하
-      ];
-
-      // 1) 직사각형이 종이 안에 완전히 들어가야 함
-      let insidePaper = corners.every(
-        (p) =>
-          p.x >= x && p.x <= x + w &&
-          p.y >= y && p.y <= y + h
-      );
-      if (!insidePaper) continue;
-
-      // 2) 경계 점들 빠른 체크
-      const edgeMids = [
-        { x: cx,         y: cy - halfH }, // 상 변 중앙
-        { x: cx + halfW, y: cy },         // 우 변 중앙
-        { x: cx,         y: cy + halfH }, // 하 변 중앙
-        { x: cx - halfW, y: cy },         // 좌 변 중앙
-      ];
-
-      const boundaryPoints = corners.concat(edgeMids);
-      let boundaryOK = boundaryPoints.every((p) => isReachableSimple(p.x, p.y));
-      if (!boundaryOK) continue;
-
-      // 3) 내부 전체 그리드 샘플링
-      if (!allPointsReachableInRect(cx, cy, width, height, maxGridStep)) {
-        continue;
+  
+  // 1단계: 대략적인 중심점 찾기 (성긴 그리드)
+  const coarseStep = 30;
+  const candidates = [];
+  
+  for (let cx = x + 50; cx < x + w - 50; cx += coarseStep) {
+    for (let cy = y + 50; cy < y + h - 50; cy += coarseStep) {
+      // 🔵 중심점이 baseX보다 왼쪽에 있고 도달 가능한지 체크
+      if (cx < baseX && isReachableSimple(cx, cy)) {
+        candidates.push({ cx, cy });
       }
-
-      // 면적 계산
-      const area = width * height;
+    }
+  }
+  
+  console.log(`Found ${candidates.length} candidate centers`);
+  
+  // 2단계: 각 후보 중심점에서 최대 직사각형 찾기
+  for (const center of candidates) {
+    const { cx, cy } = center;
+    
+    // 🔵 baseX 제약을 고려한 최대 폭 계산
+    const maxPossibleWidth = Math.min(w, (baseX - cx) * 2);
+    
+    // 이진 탐색으로 최대 크기 찾기
+    let maxWidth = binarySearchMaxWidth(cx, cy, maxPossibleWidth);
+    let maxHeight = binarySearchMaxHeight(cx, cy, maxWidth);
+    
+    if (maxWidth > 0 && maxHeight > 0) {
+      const area = maxWidth * maxHeight;
       if (area > bestArea) {
         bestArea = area;
-        bestRect = { cx, cy, width, height };
+        bestRect = { cx, cy, width: maxWidth, height: maxHeight };
       }
     }
   }
 
+  console.log("Best rect found:", bestRect);
   return bestRect;
+}
+
+// 최대 폭 찾기 (baseX 제약 포함)
+function binarySearchMaxWidth(cx, cy, maxPossible) {
+  let low = 10;
+  let high = maxPossible;
+  let maxWidth = 0;
+  
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const halfW = mid / 2;
+    
+    // 🔵 오른쪽 끝이 baseX를 넘지 않는지 체크
+    if (cx + halfW >= baseX) {
+      high = mid - 1;
+      continue;
+    }
+    
+    // 이 폭으로 직사각형을 만들 수 있는지 체크 (높이는 임시로 100 사용)
+    if (canFitRectangle(cx, cy, mid, 100)) {
+      maxWidth = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  
+  return maxWidth;
+}
+
+// 최대 높이 찾기
+function binarySearchMaxHeight(cx, cy, fixedWidth) {
+  let low = 10;
+  let high = paperRect.h;
+  let maxHeight = 0;
+  
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    
+    if (canFitRectangle(cx, cy, fixedWidth, mid)) {
+      maxHeight = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  
+  return maxHeight;
+}
+
+// 직사각형이 들어갈 수 있는지 빠르게 체크
+function canFitRectangle(cx, cy, width, height) {
+  const halfW = width / 2;
+  const halfH = height / 2;
+  
+  // 🔵 오른쪽 끝이 baseX를 넘지 않는지 체크
+  if (cx + halfW >= baseX) return false;
+  
+  // 1) 종이 안에 있는지
+  if (cx - halfW < paperRect.x || cx + halfW > paperRect.x + paperRect.w) return false;
+  if (cy - halfH < paperRect.y || cy + halfH > paperRect.y + paperRect.h) return false;
+  
+  // 2) 코너만 체크 (빠른 검증)
+  const corners = [
+    { x: cx - halfW, y: cy - halfH },
+    { x: cx + halfW, y: cy - halfH },
+    { x: cx + halfW, y: cy + halfH },
+    { x: cx - halfW, y: cy + halfH },
+  ];
+  
+  for (const corner of corners) {
+    if (!isReachableSimple(corner.x, corner.y)) return false;
+  }
+  
+  // 3) 변의 중간점 체크
+  const edgeMids = [
+    { x: cx, y: cy - halfH },
+    { x: cx + halfW, y: cy },
+    { x: cx, y: cy + halfH },
+    { x: cx - halfW, y: cy },
+  ];
+  
+  for (const mid of edgeMids) {
+    if (!isReachableSimple(mid.x, mid.y)) return false;
+  }
+  
+  // 4) 성긴 내부 그리드 체크 (크기에 비례)
+  const step = Math.max(20, Math.min(width, height) / 5);
+  
+  for (let x = cx - halfW + step; x < cx + halfW; x += step) {
+    for (let y = cy - halfH + step; y < cy + halfH; y += step) {
+      if (!isReachableSimple(x, y)) return false;
+    }
+  }
+  
+  return true;
+}
+
+// 이진 탐색으로 최대 크기 찾기
+function binarySearchMaxSize(cx, cy, isWidth) {
+  let low = 10;
+  let high = isWidth ? paperRect.w : paperRect.h;
+  let maxSize = 0;
+  
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    
+    // 현재 크기로 직사각형을 만들 수 있는지 체크
+    const testWidth = isWidth ? mid : maxSize || 100;
+    const testHeight = isWidth ? maxSize || 100 : mid;
+    
+    if (canFitRectangle(cx, cy, testWidth, testHeight)) {
+      maxSize = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  
+  return maxSize;
+}
+
+// 직사각형이 들어갈 수 있는지 빠르게 체크
+function canFitRectangle(cx, cy, width, height) {
+  const halfW = width / 2;
+  const halfH = height / 2;
+  
+  // 1) 종이 안에 있는지
+  if (cx - halfW < paperRect.x || cx + halfW > paperRect.x + paperRect.w) return false;
+  if (cy - halfH < paperRect.y || cy + halfH > paperRect.y + paperRect.h) return false;
+  
+  // 2) 코너만 체크 (빠른 검증)
+  const corners = [
+    { x: cx - halfW, y: cy - halfH },
+    { x: cx + halfW, y: cy - halfH },
+    { x: cx + halfW, y: cy + halfH },
+    { x: cx - halfW, y: cy + halfH },
+  ];
+  
+  for (const corner of corners) {
+    if (!isReachableSimple(corner.x, corner.y)) return false;
+  }
+  
+  // 3) 변의 중간점 체크
+  const edgeMids = [
+    { x: cx, y: cy - halfH },
+    { x: cx + halfW, y: cy },
+    { x: cx, y: cy + halfH },
+    { x: cx - halfW, y: cy },
+  ];
+  
+  for (const mid of edgeMids) {
+    if (!isReachableSimple(mid.x, mid.y)) return false;
+  }
+  
+  // 4) 성긴 내부 그리드 체크 (크기에 비례)
+  const step = Math.max(20, Math.min(width, height) / 5);
+  
+  for (let x = cx - halfW + step; x < cx + halfW; x += step) {
+    for (let y = cy - halfH + step; y < cy + halfH; y += step) {
+      if (!isReachableSimple(x, y)) return false;
+    }
+  }
+  
+  return true;
 }
 
 // =======================
