@@ -816,7 +816,9 @@ if (isPlaying) {
     let j2 = trunc1(ik.joint2);
     // 범위 내에 있는지 검사
     j1 = Math.max(J1_MIN, Math.min(J1_MAX, j1));
-    j2 = Math.max(J2_MIN, Math.min(J2_MAX, j2));    
+    j2 = Math.max(J2_MIN, Math.min(J2_MAX, j2));
+    $('encoder.joint_1').d = j1;
+    $('encoder.joint_2').d = j2;
     currentAngleJoint1 = j1;
     currentAngleJoint2 = j2;
     currentPen = pt.pen;
@@ -934,8 +936,8 @@ if (trailPoints.length > 1) {
   p.push();
   p.fill(0);
   p.textSize(12);
-  p.text(`J1: ${currentAngleJoint1.toFixed(1)} deg`, 50, 50);
-  p.text(`J2: ${currentAngleJoint2.toFixed(1)} deg`, 50, 70);
+  p.text(`J1: ${$('encoder.joint_1').d} deg`, 50, 50);
+  p.text(`J2: ${$('encoder.joint_2').d} deg`, 50, 70);
   p.text(`L1: ${link1Length.toFixed(0)}px`, 50, 90);
   p.text(`L2: ${link2Length.toFixed(0)}px`, 50, 110);
 
