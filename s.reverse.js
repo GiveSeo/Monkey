@@ -47,7 +47,7 @@ let joint1Moving = false;
 let joint2Moving = false;
 const ANGLE_THRESHOLD = 0.5; // 도달 판정 임계값 (도)
 
-// 관절 범위 (monkey 객체에 min/max 값이 들어있다고 가정)
+// 관절 범위 (path로 인해 한번 이상 이동해야 정상적인 관절 범위 확인 가능)
 let minJoint1 =  1e9;
 let maxJoint1 = -1e9;
 let minJoint2 =  1e9;
@@ -101,7 +101,7 @@ function setupSimulator(p) {
   canvasHeight = 800 * scale + moreHeight;
 
    p.frameRate(100);
-  // Spine에서 이미지 경로 얻기
+  // Spine에서 이미지 경로 얻기 / 역방향 이미지 
   topPath   = spine.images.get("top_reverse.png");
   upperPath = spine.images.get("upperarm_reverse.png");
   forePath  = spine.images.get("forearm_reverse.png");
@@ -177,7 +177,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
 
   const points  = [];
 
-  // 브라우저에서 길이/좌표 계산용 임시 SVG
+  // 브라우저 임시 svg
   const tempSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   tempSvg.setAttribute("width", "0");
   tempSvg.setAttribute("height", "0");
@@ -188,7 +188,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
 
   let lastGlobalPt = null; // 이전 shape의 마지막 점
 
-  // ----- Transform 유틸 -----
+  // transform 파싱 함수
   function parseTransform(transformStr) {
     if (!transformStr) return null;
 
@@ -283,8 +283,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
 
     return true;
   }
-
-  // ----- 기본 도형 → path 변환 -----
+  // 기본 도형 좌표 추출 함수
   function circleToPath(cx, cy, r, m) {
     const center = applyTransform(cx, cy, m);
     let newR = r;
@@ -403,7 +402,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
     return points;
   }
 
-  // ----- 각 shape 처리 -----
+  // 각 shape에 따라 처리
   allElements.forEach((info) => {
     const el      = info.element;
     const tagName = info.tagName;
@@ -496,7 +495,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
     tempSvg.removeChild(pathEl);
     if (!localPoints.length) return;
 
-    // 이전 shape의 끝점 → 이번 shape의 시작점 까지 펜 업 이동
+    // 이전 shape의 끝점 → 이번 shape의 시작점 까지 펜 업 이동 (물리적으로 순간이동 방지)
     if (lastGlobalPt) {
       const start = lastGlobalPt;
       const end   = localPoints[0];
@@ -592,7 +591,7 @@ function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
   if (d < 1e-6) d = 1e-6;
 
   // 작업공간까지
-  const maxReach = L1 + L2 - 1e-3;
+  const maxReach = L1 + L2 - 1e-3; //약간의 여유 공간(10 -3승)
   const minReach = Math.abs(L1 - L2) + 1e-3;
    // d = Math.max(minReach, Math.min(maxReach, d));
 
@@ -682,7 +681,7 @@ function drawSimulator(p) {
         currentPen = pt.pen;
       }
     }
-
+    // 최대한 오차를 보기 위해 joint1 -> joint2 순으로 움직이는 코드
     // joint1 제어
     if (joint1Moving) {
       const diff1 = targetAngleJoint1 - currentAngleJoint1;
