@@ -8,7 +8,7 @@ function sketch() {
 }
 
 // 전역 변수
-let STEP          = 2;
+let STEP          = 2; // 샘플링 단위
 let FILENAME      = "Cat.svg";
 let drawScale     = 0.4;   // SVG → 로봇 스케일
 let svgPathPoints = [];    // 최종: 로봇 좌표계 (x, y, pen)
@@ -482,6 +482,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
     const localPoints = [];
     let isFirst = true;
 
+    // 일정 단위로 샘플링
     for (let len = 0; len <= totalLength; len += step) {
       const pt = pathEl.getPointAtLength(len);
       localPoints.push({ x: pt.x, y: pt.y, pen: isFirst ? 0 : 1 });
