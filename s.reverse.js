@@ -8,7 +8,11 @@ function sketch() {
 }
 
 // 전역 변수
-let STEP          = 2; // 샘플링 단위
+let STEP_DEG = 0.01; // 1스탭당 몇도인지
+const MAX_STEPS_PT   = 8;                 // point -> point 최대 8 step
+const MAX_DELTA_DEG  = STEP_DEG * MAX_STEPS_PT; // 0.08도
+
+let STEP          = 2; // SVG 길이 기준 샘플링 단위(px)
 let FILENAME      = "Cat.svg";
 let drawScale     = 0.4;   // SVG → 로봇 스케일
 let svgPathPoints = [];    // 최종: 로봇 좌표계 (x, y, pen)
@@ -79,8 +83,16 @@ const FORE_PEN_Y         = 612;
 
 // 재생 관련 상태
 let isPlaying      = true;
+// trailPoints는 더 이상 O(N)으로 그리지 않을 거라 꼭 필요하진 않지만,
+// 필요하면 디버그용으로 남겨도 됨. 여기서는 안 씀.
 let trailPoints    = [];
 let debugFrame     = 0;
+
+// ✅ 궤적을 '구워둘' 레이어 & 이전 펜 위치(화면 좌표 기준)
+let trailLayer      = null;
+let prevPenScreenX  = null;
+let prevPenScreenY  = null;
+let prevPenState    = 0;
 
 // 팝업 함수
 function openRobotPopup() {
@@ -100,7 +112,8 @@ function setupSimulator(p) {
   canvasWidth  = 1200 * scale + 400;
   canvasHeight = 800 * scale + moreHeight;
 
-   p.frameRate(100);
+  p.frameRate(100);
+
   // Spine에서 이미지 경로 얻기 / 역방향 이미지 
   topPath   = spine.images.get("top_reverse.png");
   upperPath = spine.images.get("upperarm_reverse.png");
@@ -117,12 +130,22 @@ function setupSimulator(p) {
   // 베이스 위치 계산
   initBasePosition();
 
+  // ✅ trailLayer 생성 (캔버스와 같은 크기, 투명 배경)
+  trailLayer = p.createGraphics(canvasWidth, canvasHeight);
+  trailLayer.clear();
+
   // SVG 로드 & 점 추출 → 작업공간으로 맵핑
   const svgPath = spine.images.get(FILENAME); // Spine에 등록된 SVG 경로
   p.loadStrings(svgPath, (lines) => {
     const svgText  = lines.join("\n");
     const rawPts   = extractPathPointsFromSvg(svgText, STEP);  // SVG 원 좌표
-    svgPathPoints  = fitSvgPointsToWorkspace(rawPts);          // 로봇 좌표계로 매핑
+    let fittedPts  = fitSvgPointsToWorkspace(rawPts);          // 로봇 좌표계로 매핑
+
+    // 필요하면 거리/각도 리샘플링 추가
+    // fittedPts = resamplePathByDistance(fittedPts, 4);
+    fittedPts = resamplePathByAngle(fittedPts, MAX_DELTA_DEG);
+
+    svgPathPoints = fittedPts;
   });
 
   // 팝업, 캔버스 크기 조정
@@ -169,6 +192,7 @@ function initBasePosition() {
     baseY = topMargin + 100;
   }
 }
+
 // svg에서 path, 기본 도형 좌표 추출 함수
 function extractPathPointsFromSvg(svgText, sampleStep = 2) {
   const parser  = new DOMParser();
@@ -283,6 +307,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
 
     return true;
   }
+
   // 기본 도형 좌표 추출 함수
   function circleToPath(cx, cy, r, m) {
     const center = applyTransform(cx, cy, m);
@@ -529,6 +554,78 @@ function extractPathPointsFromSvg(svgText, sampleStep = 2) {
   return points;
 }
 
+// 각도 변화량 기준 리샘플링
+function resamplePathByAngle(points, maxDeltaDeg = MAX_DELTA_DEG) {
+  if (!points || points.length === 0) return [];
+
+  const result = [];
+
+  // 첫 점 IK
+  const first = points[0];
+  let prevIK = inverseKinematics2DOF(first.x, first.y, null, null);
+  if (!prevIK) {
+    console.warn("IK failed at first point in resamplePathByAngle");
+    return points;
+  }
+  result.push({ x: first.x, y: first.y, pen: first.pen });
+
+  function subdivide(p0, ik0, p1, depth = 0) {
+    // 재귀 깊이 제한
+    if (depth > 20) {
+      const ik1_fallback = inverseKinematics2DOF(p1.x, p1.y, ik0.joint1, ik0.joint2) || ik0;
+      return [{ point: p1, ik: ik1_fallback }];
+    }
+
+    const ik1 = inverseKinematics2DOF(p1.x, p1.y, ik0.joint1, ik0.joint2);
+    if (!ik1) {
+      return [{ point: p1, ik: ik0 }];
+    }
+
+    const d1 = Math.abs(ik1.joint1 - ik0.joint1);
+    const d2 = Math.abs(ik1.joint2 - ik0.joint2);
+    const maxDelta = Math.max(d1, d2);
+
+    if (maxDelta <= maxDeltaDeg) {
+      return [{ point: p1, ik: ik1 }];
+    }
+
+    // 각도 변화 너무 크면 중간점 삽입
+    const mid = {
+      x: (p0.x + p1.x) / 2,
+      y: (p0.y + p1.y) / 2,
+      pen: p1.pen,
+    };
+
+    const ikMid = inverseKinematics2DOF(mid.x, mid.y, ik0.joint1, ik0.joint2);
+    if (!ikMid) {
+      return [{ point: p1, ik: ik1 }];
+    }
+
+    const left  = subdivide(p0,  ik0,   mid, depth + 1);
+    const right = subdivide(mid, ikMid, p1, depth + 1);
+    return [...left, ...right];
+  }
+
+  let prevPoint = first;
+
+  for (let i = 1; i < points.length; i++) {
+    const curr = points[i];
+    const segPoints = subdivide(prevPoint, prevIK, curr);
+    for (const sp of segPoints) {
+      result.push({
+        x: sp.point.x,
+        y: sp.point.y,
+        pen: curr.pen,
+      });
+    }
+    const last = segPoints[segPoints.length - 1];
+    prevPoint = curr;
+    prevIK    = last.ik;
+  }
+
+  return result;
+}
+
 // svg에서 추출한 좌표 scale 함수
 function fitSvgPointsToWorkspace(points) {
   if (!points || !points.length) return [];
@@ -581,6 +678,49 @@ function fitSvgPointsToWorkspace(points) {
   });
 }
 
+// 거리 기준 리샘플링 (필요하면 사용)
+function resamplePathByDistance(points, targetDist = 5) {
+  if (!points || points.length === 0) return [];
+
+  const result = [];
+  let prev = points[0];
+  result.push(prev);
+
+  let accDist = 0;
+
+  for (let i = 1; i < points.length; i++) {
+    const curr = points[i];
+
+    const dx = curr.x - prev.x;
+    const dy = curr.y - prev.y;
+    const segLen = Math.hypot(dx, dy);
+
+    if (segLen === 0) {
+      prev = curr;
+      continue;
+    }
+
+    let distFromPrev = targetDist - accDist;
+
+    while (distFromPrev <= segLen) {
+      const t = distFromPrev / segLen;
+
+      result.push({
+        x: prev.x + dx * t,
+        y: prev.y + dy * t,
+        pen: curr.pen,
+      });
+
+      distFromPrev += targetDist;
+    }
+
+    accDist = segLen - (distFromPrev - targetDist);
+    prev = curr;
+  }
+
+  return result;
+}
+
 // 2DOF 역기구학 함수
 function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
   const L1 = link1Length;
@@ -592,14 +732,14 @@ function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
   if (d < 1e-6) d = 1e-6;
 
   // 작업공간까지
-  const maxReach = L1 + L2 - 1e-3; //약간의 여유 공간(10 -3승)
+  const maxReach = L1 + L2 - 1e-3; //약간의 여유 공간(10^-3)
   const minReach = Math.abs(L1 - L2) + 1e-3;
-   // d = Math.max(minReach, Math.min(maxReach, d));
+  // d = Math.max(minReach, Math.min(maxReach, d)); // 필요하면 활성화
 
   let cos2 = (d * d - L1 * L1 - L2 * L2) / (2 * L1 * L2);
   cos2     = Math.max(-1, Math.min(1, cos2));
 
-  const theta2Abs = Math.acos(cos2);        // 0 ~ π
+  const theta2Abs  = Math.acos(cos2);        // 0 ~ π
   const theta2List = [theta2Abs, -theta2Abs]; // elbow down / up
 
   function solve(theta2_fk) {
@@ -635,18 +775,26 @@ function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
   return (scoreB < scoreA) ? solB : solA;
 }
 
-// 펄스 단위가 0.1도이므로, 소수점 첫째 이하는 버림
-function trunc1(x) {
-  return x >= 0
-    ? Math.floor(x * 10) / 10
-    : Math.ceil(x * 10) / 10;
+// 스텝 단위 양자화 (0.01도)
+function quantizeToStep(x) {
+  // x: degree
+  const steps = Math.round(x / STEP_DEG); // 가장 가까운 step
+  return steps * STEP_DEG;
 }
 
 //p5 draw 함수
 function drawSimulator(p) {
   debugFrame++;
 
+  // 배경
   p.background(245);
+
+  // ✅ 먼저, 이미 '구워둔' 궤적 레이어를 그대로 그린다 (scale 적용 X)
+  if (trailLayer) {
+    p.image(trailLayer, 0, 0);
+  }
+
+  // 이후부터는 기존처럼 scale 적용
   p.scale(scale);
 
   // 1) 목표점 선택 & IK 계산
@@ -670,8 +818,8 @@ function drawSimulator(p) {
           currentAngleJoint2
         );
 
-        let j1 = trunc1(ik.joint1);
-        let j2 = trunc1(ik.joint2);
+        let j1 = quantizeToStep(ik.joint1);
+        let j2 = quantizeToStep(ik.joint2);
 
         j1 = Math.max(J1_MIN, Math.min(J1_MAX, j1));
         j2 = Math.max(J2_MIN, Math.min(J2_MAX, j2));
@@ -682,7 +830,7 @@ function drawSimulator(p) {
         currentPen = pt.pen;
       }
     }
-    // 최대한 오차를 보기 위해 joint1 -> joint2 순으로 움직이는 코드
+
     // joint1 제어
     if (joint1Moving) {
       const diff1 = targetAngleJoint1 - currentAngleJoint1;
@@ -759,35 +907,31 @@ function drawSimulator(p) {
     p.pop();
   }
 
-  // 6) 펜 위치 & 궤적 기록
+  // 6) 펜 위치 & 궤적 trailLayer에 '굽기'
   const penX = x3;
   const penY = y3;
 
-  trailPoints.push({ x: penX, y: penY, pen: currentPen });
+  // 🔴 이전처럼 trailPoints 전체를 매 프레임 다시 그리지 않고,
+  //    새로 생긴 한 구간만 trailLayer에 라인으로 추가
+  if (trailLayer) {
+    // world -> screen 좌표로 변환 (scale 적용)
+    const penScreenX = penX * scale;
+    const penScreenY = penY * scale;
 
-  // 펜이 다운이면 궤적을 그림
-  if (trailPoints.length > 1) {
-    p.push();
-    p.stroke(255, 0, 0);
-    p.strokeWeight(2);
-    p.noFill();
-
-    for (let i = 1; i < trailPoints.length; i++) {
-      const prev = trailPoints[i - 1];
-      const curr = trailPoints[i];
-      if (prev.pen === 1 && curr.pen === 1) {
-        p.line(prev.x, prev.y, curr.x, curr.y);
-      }
+    if (prevPenScreenX !== null && prevPenScreenY !== null &&
+        prevPenState === 1 && currentPen === 1) {
+      trailLayer.push();
+      trailLayer.stroke(255, 0, 0);
+      trailLayer.strokeWeight(2);
+      trailLayer.noFill();
+      trailLayer.line(prevPenScreenX, prevPenScreenY, penScreenX, penScreenY);
+      trailLayer.pop();
     }
-    p.pop();
-  }
 
-  // 펜 위치 표시
-  p.push();
-  p.stroke(0);
-  p.fill(currentPen === 1 ? p.color(100, 200, 255) : p.color(200));
-  p.ellipse(penX, penY, 20, 20);
-  p.pop();
+    prevPenScreenX = penScreenX;
+    prevPenScreenY = penScreenY;
+    prevPenState   = currentPen;
+  }
 
   // 7) 관절 범위 기록
   if (debugFrame > 5) {
@@ -819,7 +963,7 @@ function drawSimulator(p) {
   p.text(`MAX J2: ${maxJoint2}`,            50, 350);
   p.pop();
 
-  // 9) SVG 원본 궤적 (파란선)
+  // 9) SVG 원본 궤적 (파란선) — 이건 디버그용이니 필요할 때만 켜기
   if (showSvgPath) {
     drawSvgPathPoints(p);
   }
