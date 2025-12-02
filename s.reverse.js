@@ -44,6 +44,9 @@ let Yoffset = -50;
 let upperRestAngle = 0; // upperarm 이미지 기울어진 각도
 let foreRestAngle  = 0; // forearm 이미지 기울어진 각도
 
+// SVG를 모션 기준으로 쓸지 여부 + 인덱스/속도
+let useSvgAsMotion  = true;
+let svgIndex        = 0;
 let svgFrameSkip    = 2; // 숫자 줄이면 더 빨리 움직임
 let svgFrameCounter = 0;
 
@@ -56,12 +59,14 @@ let link1Length, link2Length;
 let imgTop, imgUpper, imgFore;
 let topPath, upperPath, forePath;
 
-let currentAngleJoint1 = 0;
+let currentAngleJoint1 = -90;
 let currentAngleJoint2 = 0;
 let currentPen         = 0; // 0: 펜 업, 1: 펜 다운
 
 let targetAngleJoint1 = 0;
 let targetAngleJoint2 = 0;
+let joint1Moving = false;
+let joint2Moving = false;
 const ANGLE_THRESHOLD = 0.5; // 도달 판정 임계값 (도)
 
 // 관절 범위 (path로 인해 한번 이상 이동해야 정상적인 관절 범위 확인 가능)
@@ -77,8 +82,8 @@ const imageScale = 0.5;  // PNG 이미지 자체 스케일
 //spine 모델에서 최솟값, 최댓값 추출
 const J1_MIN = monkey.minJoint1;
 const J1_MAX = monkey.maxJoint1;
-const J2_MIN = monkey.minJoint2 ;
-const J2_MAX = monkey.maxJoint2;
+const J2_MIN = monkey.minJoint2 - JOINT2_OFFSET;
+const J2_MAX = monkey.maxJoint2- JOINT2_OFFSET;
 
 // 이미지 기준 팔 관절 픽셀 좌표 (길이 구하거나, 각도 측정시 필요)
 const TOP_JOINT_X = 220;
@@ -140,7 +145,7 @@ function playJsonStep() {
 
   // 엔코더 값도 같이 업데이트
   $("encoder.joint_1").d = currentAngleJoint1;
-$("encoder.joint_2").d = currentAngleJoint2 + JOINT2_OFFSET;
+  $("encoder.joint_2").d = currentAngleJoint2;
 
   jsonIndex++;
 }
@@ -166,36 +171,16 @@ function startJsonPlayback(jsonData) {
   }
 }
 
-function pushClampedStep(dx, dy, penState) {
-  let remX = dx;
-  let remY = dy;
-
-  while (remX !== 0 || remY !== 0) {
-    const stepX = Math.abs(remX) > MAX_STEPS_PT
-      ? Math.sign(remX) * MAX_STEPS_PT
-      : remX;
-    const stepY = Math.abs(remY) > MAX_STEPS_PT
-      ? Math.sign(remY) * MAX_STEPS_PT
-      : remY;
-
-    motionJson.push({
-      d1: stepX,
-      d2: stepY,
-      pen: penState,
-    });
-
-    remX -= stepX;
-    remY -= stepY;
-  }
-}
-
 function buildMotionJsonFromSvg() {
   if (jsonBuilt) return;
   if (!svgPathPoints || svgPathPoints.length === 0) return;
 
+  console.log("🔧 motionJson 생성 시작...");
   motionJson = [];
 
-  // 로봇 홈 기준(0 step = 0도)에서 시작한다고 가정
+  // =========================================================
+  // 1. 초기 설정 (홈 위치 0,0)
+  // =========================================================
   let curStepJ1 = 0;
   let curStepJ2 = 0;
   let prevPen   = 0;
@@ -206,68 +191,155 @@ function buildMotionJsonFromSvg() {
   const j2MinStep = Math.round(J2_MIN / STEP_DEG);
   const j2MaxStep = Math.round(J2_MAX / STEP_DEG);
 
-  // 이전 IK 각도(도) — elbow up/down 선택용
-  let prevJ1Deg = null;
-  let prevJ2Deg = null;
+  // IK 연속성을 위한 이전 각도 변수
+  let prevJ1Deg = 0;
+  let prevJ2Deg = 0;
 
-  for (const pt of svgPathPoints) {
-    // 1) IK로 joint 각도(도) 계산
-    const ik = inverseKinematics2DOF(
-      pt.x,
-      pt.y,
-      prevJ1Deg,
-      prevJ2Deg
-    );
+  // =========================================================
+  // 보조 함수: 두 스텝 위치 사이를 MAX_STEPS_PT 이하로 분할하여 이동
+  // =========================================================
+  function moveToTarget(targetJ1, targetJ2, penState) {
+    const totalDiff1 = targetJ1 - curStepJ1;
+    const totalDiff2 = targetJ2 - curStepJ2;
+
+    const maxDiff = Math.max(Math.abs(totalDiff1), Math.abs(totalDiff2));
+    
+    if (maxDiff === 0) {
+      // 움직임이 없지만 펜 상태가 바뀌었다면 기록
+      if (penState !== prevPen) {
+        motionJson.push({
+          d1: 0,
+          d2: 0,
+          pen: penState,
+        });
+        prevPen = penState;
+      }
+      return;
+    }
+
+    // MAX_STEPS_PT(8)를 초과하면 분할
+    const stepsNeeded = Math.ceil(maxDiff / MAX_STEPS_PT);
+
+    // 안전장치: 너무 많이 분할되는 경우 제한
+    if (stepsNeeded > 1000) {
+      console.warn(`⚠️ 과도한 분할 감지 (${stepsNeeded}), 100으로 제한`);
+      stepsNeeded = 100;
+    }
+
+    let accumulatedJ1 = 0;
+    let accumulatedJ2 = 0;
+
+    for (let i = 1; i <= stepsNeeded; i++) {
+      // 선형 보간으로 중간 지점 계산
+      const t = i / stepsNeeded;
+
+      // 목표 누적 증분 계산
+      const targetAccJ1 = Math.round(totalDiff1 * t);
+      const targetAccJ2 = Math.round(totalDiff2 * t);
+
+      // 이번 스텝의 실제 증분
+      const d1 = targetAccJ1 - accumulatedJ1;
+      const d2 = targetAccJ2 - accumulatedJ2;
+
+      // 누적값 업데이트
+      accumulatedJ1 = targetAccJ1;
+      accumulatedJ2 = targetAccJ2;
+
+      // 마지막 구간에서만 penState 적용
+      const currentPen = (i === stepsNeeded) ? penState : 0;
+
+      // 움직임이 있거나 펜 상태가 변경되었을 때만 JSON 추가
+      if (d1 !== 0 || d2 !== 0 || currentPen !== prevPen) {
+        motionJson.push({
+          d1: d1,
+          d2: d2,
+          pen: currentPen,
+        });
+        prevPen = currentPen;
+      }
+
+      // 현재 위치 업데이트
+      curStepJ1 += d1;
+      curStepJ2 += d2;
+    }
+  }
+
+  // =========================================================
+  // 2. Home(0,0) -> 첫 번째 포인트 이동 경로 생성
+  // =========================================================
+  if (svgPathPoints.length > 0) {
+    const firstPt = svgPathPoints[0];
+    const firstIk = inverseKinematics2DOF(firstPt.x, firstPt.y, 0, 0);
+
+    if (firstIk) {
+      let targetStartJ1 = Math.round(firstIk.joint1 / STEP_DEG);
+      let targetStartJ2 = Math.round(firstIk.joint2 / STEP_DEG);
+
+      targetStartJ1 = Math.max(j1MinStep, Math.min(j1MaxStep, targetStartJ1));
+      targetStartJ2 = Math.max(j2MinStep, Math.min(j2MaxStep, targetStartJ2));
+
+      console.log(`📍 Home(0,0) → 첫 포인트(${targetStartJ1}, ${targetStartJ2})`);
+      moveToTarget(targetStartJ1, targetStartJ2, 0);
+
+      prevJ1Deg = firstIk.joint1;
+      prevJ2Deg = firstIk.joint2;
+    }
+  }
+
+  // =========================================================
+  // 3. SVG 경로 따라가기
+  // =========================================================
+  let processedPoints = 0;
+  const totalPoints = svgPathPoints.length;
+  const logInterval = Math.max(1, Math.floor(totalPoints / 10)); // 10% 단위로 로그
+
+  for (let idx = 0; idx < svgPathPoints.length; idx++) {
+    const pt = svgPathPoints[idx];
+
+    // 진행상황 로그
+    if (idx % logInterval === 0) {
+      console.log(`📊 진행: ${idx}/${totalPoints} (${Math.round(idx/totalPoints*100)}%)`);
+    }
+
+    // IK로 joint 각도(도) 계산
+    const ik = inverseKinematics2DOF(pt.x, pt.y, prevJ1Deg, prevJ2Deg);
 
     if (!ik) {
-      console.warn("IK 실패, 이 포인트는 스킵", pt);
+      console.warn(`⚠️ IK 실패, 포인트 ${idx} 스킵`, pt);
       continue;
     }
 
-    // 2) 각도(도) → step (정수)
+    // 각도(도) → step (정수)
     let targetStepJ1 = Math.round(ik.joint1 / STEP_DEG);
     let targetStepJ2 = Math.round(ik.joint2 / STEP_DEG);
 
-    // 3) 관절 제한 적용
+    // 관절 제한 적용
     targetStepJ1 = Math.max(j1MinStep, Math.min(j1MaxStep, targetStepJ1));
     targetStepJ2 = Math.max(j2MinStep, Math.min(j2MaxStep, targetStepJ2));
 
-    // 4) 이번 포인트에서 필요한 step 증분 계산
-    const diffStepJ1 = targetStepJ1 - curStepJ1;
-    const diffStepJ2 = targetStepJ2 - curStepJ2;
+    // 목표 위치로 이동
+    moveToTarget(targetStepJ1, targetStepJ2, pt.pen);
 
-    // resamplePathByAngle 덕분에 이 값이 MAX_STEPS_PT(=8) 안쪽이어야 정상
-    if (Math.abs(diffStepJ1) > MAX_STEPS_PT || Math.abs(diffStepJ2) > MAX_STEPS_PT) {
-      console.warn("경고: 한 포인트에서 step 변화가 MAX_STEPS_PT를 초과함",
-        diffStepJ1, diffStepJ2);
-    }
-
-    const penState = pt.pen; // 0/1 그대로 사용
-
-    // 5) 실제로 움직임이나 펜 상태 변화가 있을 때만 JSON에 푸시
-if (diffStepJ1 !== 0 || diffStepJ2 !== 0 || penState !== prevPen) {
-  // 모든 명령이 MAX_STEPS_PT 이하가 되도록 쪼개서 push
-  pushClampedStep(diffStepJ1, diffStepJ2, penState);
-}
-
-    // 6) 현재 step / IK 상태 업데이트
-    curStepJ1 = targetStepJ1;
-    curStepJ2 = targetStepJ2;
-
+    // 상태 업데이트
     prevJ1Deg = ik.joint1;
     prevJ2Deg = ik.joint2;
-    prevPen   = penState;
+    processedPoints++;
   }
 
   jsonBuilt = true;
-  console.log("✅ motionJson 생성 완료:", motionJson);
-  console.log("JSON 문자열:", JSON.stringify(motionJson));
+  
+  console.log(`✅ motionJson 생성 완료!`);
+  console.log(`   - 총 ${motionJson.length}개 명령`);
+  console.log(`   - 처리된 포인트: ${processedPoints}/${totalPoints}`);
+  console.log(`   - 모든 움직임 ≤ ${MAX_STEPS_PT} step 보장`);
+  console.log("");
+  console.log("=== JSON 출력 시작 ===");
+  console.log(JSON.stringify(motionJson));
+  console.log("=== JSON 출력 끝 ===");
 }
 
 // p5 setup 함수
 function setupSimulator(p) {
-  const svgPath = spine.images.get(FILENAME);
-
   canvasWidth  = 1200 * scale + 400;
   canvasHeight = 800 * scale + moreHeight;
 
@@ -293,26 +365,26 @@ function setupSimulator(p) {
   trailLayer = p.createGraphics(canvasWidth, canvasHeight);
   trailLayer.clear();
 
-p.loadStrings(svgPath, (lines) => {
-  const svgText  = lines.join("\n");
-  const rawPts   = extractPathPointsFromSvg(svgText, STEP);
-  let fittedPts  = fitSvgPointsToWorkspace(rawPts);
+  // SVG 로드 & 점 추출 → 작업공간으로 맵핑
+  const svgPath = spine.images.get(FILENAME); // Spine에 등록된 SVG 경로
+  p.loadStrings(svgPath, (lines) => {
+    const svgText  = lines.join("\n");
+    const rawPts   = extractPathPointsFromSvg(svgText, STEP);  // SVG 원 좌표
+    let fittedPts  = fitSvgPointsToWorkspace(rawPts);          // 로봇 좌표계로 매핑
 
-  // 각도 변화 기준 리샘플링 (IK 안정화용)
-  fittedPts = resamplePathByAngle(fittedPts, MAX_DELTA_DEG);
+    // 필요하면 거리/각도 리샘플링 추가
+    // fittedPts = resamplePathByDistance(fittedPts, 4);
+    fittedPts = resamplePathByAngle(fittedPts, MAX_DELTA_DEG);
 
-  // 디버그용으로만 보관 (안 써도 됨)
-  svgPathPoints = fittedPts;
+    svgPathPoints = fittedPts;
 
-  // 1) SVG → 로봇용 JSON 생성
-  buildMotionJsonFromSvg();
+    // ✅ 1) SVG → 로봇용 JSON 생성
+    buildMotionJsonFromSvg();
 
-  // 2) JSON 기준 재생 시작 (home = deg 0,0 에서)
-  startJsonPlayback(motionJson);
-
-  // JSON만 쓸 거라면 굳이 플래그도 필요 없음
-  // useJsonMotion = true; // 이미 startJsonPlayback 안에서 켜도 됨
-});
+    // ✅ 2) 시뮬레이터를 JSON 기준으로 돌려보고 싶다면:
+    startJsonPlayback();
+    useSvgAsMotion = false; // SVG 모션 끄고 JSON 모션만 사용
+  });
 
   // 팝업, 캔버스 크기 조정
   w2custompopup.resize(canvasWidth + 16, canvasHeight + 96);
@@ -922,7 +994,7 @@ function solve(theta2_fk) {
 
   // 🔸 새 기준: joint2_new = joint2_physical - 140
   const joint1Deg = joint1DegPhysical;
-  const joint2Deg = joint2DegPhysical;
+  const joint2Deg = joint2DegPhysical - JOINT2_OFFSET;
 
   return { joint1: joint1Deg, joint2: joint2Deg };
 }
@@ -969,13 +1041,23 @@ function drawSimulator(p) {
   p.scale(scale);
 
   // 1) 모션 소스 선택 (JSON or SVG)
-  if (isPlaying&& motionJson.length>0) {
-    playJsonStep();
+  if (isPlaying) {
+    if (useJsonMotion && motionJson.length > 0) {
+      // 로봇 JSON 기준 재생
+      playJsonStep();
+    } else if (useSvgAsMotion && svgPathPoints.length > 0) {
+      // 기존 SVG + IK 기반 재생
+      playSvgMotion(p);
+    }
   }
 
-
+  // 2) Forward Kinematics (현재 joint 각도로 포즈 계산)
 const theta1 = p.radians(currentAngleJoint1) * -1;
-const theta2 = p.radians(currentAngleJoint2) * -1;  // ★ 그 자체
+
+// 🔸 joint2: 새 기준(0이었던 곳이 140)이므로,
+//    물리각 = currentAngleJoint2 + 140
+const physicalJ2 = currentAngleJoint2 + JOINT2_OFFSET;
+const theta2 = p.radians(physicalJ2) * -1;
 
 const theta1_fk = theta1 + upperRestAngle;
 
@@ -1060,6 +1142,10 @@ const y3 = y2 + link2Length * p.sin(theta1_fk + theta2);
   p.text(isPlaying ? "Playing" : "Paused", 50, 150);
   p.text(`Pen: ${currentPen}`,              50, 170);
   p.text(`SVG pts: ${svgPathPoints.length}`,50, 190);
+  p.text(`SVG idx: ${svgIndex}`,            50, 210);
+  p.text(`SVG motion: ${useSvgAsMotion}`,   50, 230);
+  p.text(`J1 moving: ${joint1Moving}`,      50, 250);
+  p.text(`J2 moving: ${joint2Moving}`,      50, 270);
   p.text(`MIN J1: ${minJoint1}`,            50, 290);
   p.text(`MAX J1: ${maxJoint1}`,            50, 310);
   p.text(`MIN J2: ${minJoint2}`,            50, 330);
@@ -1067,4 +1153,88 @@ const y3 = y2 + link2Length * p.sin(theta1_fk + theta2);
   p.pop();
 
   // 필요하면 여기서 showSvgPath로 파란 SVG 궤적도 표시 가능
+}
+
+function playSvgMotion(p) {
+  const pt = svgPathPoints[svgIndex];
+
+  const dynamicSkip = (pt.pen === 0 ? 1 : svgFrameSkip);
+  svgFrameCounter++;
+
+  if (svgFrameCounter >= dynamicSkip) {
+    svgFrameCounter = 0;
+    
+    // 다음 포인트로 이동 (joint1, joint2가 모두 목표에 도달했을 때만)
+    if (!joint1Moving && !joint2Moving) {
+      svgIndex = Math.min(svgIndex + 1, svgPathPoints.length - 1);
+      
+      const ik = inverseKinematics2DOF(
+        pt.x,
+        pt.y,
+        currentAngleJoint1,
+        currentAngleJoint2
+      );
+
+      let j1 = quantizeToStep(ik.joint1);
+      let j2 = quantizeToStep(ik.joint2);
+
+      j1 = Math.max(J1_MIN, Math.min(J1_MAX, j1));
+      j2 = Math.max(J2_MIN, Math.min(J2_MAX, j2));
+
+      targetAngleJoint1 = j1;
+      targetAngleJoint2 = j2;
+      joint1Moving = true;
+      currentPen = pt.pen;
+    }
+  }
+
+  // joint1 제어
+  if (joint1Moving) {
+    const diff1 = targetAngleJoint1 - currentAngleJoint1;
+
+    if (Math.abs(diff1) < ANGLE_THRESHOLD) {
+      currentAngleJoint1 = targetAngleJoint1;
+      joint1Moving = false;
+      joint2Moving = true;
+    } else {
+      const step1 = Math.sign(diff1) * Math.min(Math.abs(diff1), 2.0);
+      currentAngleJoint1 += step1;
+    }
+
+    $("encoder.joint_1").d = currentAngleJoint1;
+  }
+
+  // joint2 제어
+  if (joint2Moving) {
+    const diff2 = targetAngleJoint2 - currentAngleJoint2;
+
+    if (Math.abs(diff2) < ANGLE_THRESHOLD) {
+      currentAngleJoint2 = targetAngleJoint2;
+      joint2Moving = false;
+    } else {
+      const step2 = Math.sign(diff2) * Math.min(Math.abs(diff2), 2.0);
+      currentAngleJoint2 += step2;
+    }
+
+    $("encoder.joint_2").d = currentAngleJoint2;
+  }
+}
+
+// 파란 선 (궤적) 원본 궤적 그리기
+function drawSvgPathPoints(p) {
+  if (!svgPathPoints || svgPathPoints.length < 2) return;
+
+  p.push();
+  p.stroke(0, 0, 255);
+  p.strokeWeight(2);
+  p.noFill();
+
+  for (let i = 1; i < svgPathPoints.length; i++) {
+    const prev = svgPathPoints[i - 1];
+    const curr = svgPathPoints[i];
+    if (prev.pen === 1 && curr.pen === 1) {
+      p.line(prev.x, prev.y, curr.x, curr.y);
+    }
+  }
+  p.pop();
 }
