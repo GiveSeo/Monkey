@@ -7,6 +7,13 @@ function sketch() {
   }, "p5-canvas");
 }
 
+function normalizeAngle(angle) {
+  // angle을 -180 ~ 180 범위로 정규화
+  while (angle > 180) angle -= 360;
+  while (angle < -180) angle += 360;
+  return angle;
+}
+
 // =======================
 // 로봇 JSON 관련 전역
 // =======================
@@ -82,8 +89,8 @@ const imageScale = 0.5;  // PNG 이미지 자체 스케일
 //spine 모델에서 최솟값, 최댓값 추출
 const J1_MIN = monkey.minJoint1;
 const J1_MAX = monkey.maxJoint1;
-const J2_MIN = monkey.minJoint2 - JOINT2_OFFSET;
-const J2_MAX = monkey.maxJoint2- JOINT2_OFFSET;
+const J2_MIN = normalizeAngle(monkey.minJoint2 - JOINT2_OFFSET);
+const J2_MAX = normalizeAngle(monkey.maxJoint2- JOINT2_OFFSET);
 
 // 이미지 기준 팔 관절 픽셀 좌표 (길이 구하거나, 각도 측정시 필요)
 const TOP_JOINT_X = 220;
@@ -133,8 +140,8 @@ function playJsonStep() {
   const deltaDeg2 = cmd.d2 * STEP_DEG;
 
   // 각도 적용
-  currentAngleJoint1 += deltaDeg1;
-  currentAngleJoint2 += deltaDeg2;
+  currentAngleJoint1 += normalizeAngle(deltaDeg1);
+  currentAngleJoint2 += normalizeAngle(deltaDeg2);
 
   // 관절 제한 클램프 (혹시라도 JSON이 범위 넘어가면 잘라줌)
   currentAngleJoint1 = Math.max(J1_MIN, Math.min(J1_MAX, currentAngleJoint1));
@@ -246,7 +253,7 @@ function buildMotionJsonFromSvg() {
       accumulatedJ2 = targetAccJ2;
 
       // 마지막 구간에서만 penState 적용
-      const currentPen = (i === stepsNeeded) ? penState : 0;
+      const currentPen = penState;
 
       // 움직임이 있거나 펜 상태가 변경되었을 때만 JSON 추가
       if (d1 !== 0 || d2 !== 0 || currentPen !== prevPen) {
@@ -370,7 +377,7 @@ function setupSimulator(p) {
   p.loadStrings(svgPath, (lines) => {
     const svgText  = lines.join("\n");
     const rawPts   = extractPathPointsFromSvg(svgText, STEP);  // SVG 원 좌표
-    let fittedPts  = fitSvgPointsToWorkspace(rawPts);          // 로봇 좌표계로 매핑
+    let fittedPts  = fitSvgPointsToWorkspaceSafe(rawPts);          // 로봇 좌표계로 매핑
 
     // 필요하면 거리/각도 리샘플링 추가
     // fittedPts = resamplePathByDistance(fittedPts, 4);
@@ -379,7 +386,7 @@ function setupSimulator(p) {
     svgPathPoints = fittedPts;
 
     // ✅ 1) SVG → 로봇용 JSON 생성
-    buildMotionJsonFromSvg();
+    buildMotionJsonFromSvgSafe();
 
     // ✅ 2) 시뮬레이터를 JSON 기준으로 돌려보고 싶다면:
     startJsonPlayback();
@@ -432,7 +439,7 @@ function initBasePosition() {
 }
 
 // svg에서 path, 기본 도형 좌표 추출 함수
-function extractPathPointsFromSvg(svgText, sampleStep = 2) {
+function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
   const parser  = new DOMParser();
   const doc     = parser.parseFromString(svgText, "image/svg+xml");
   const svgRoot = doc.documentElement;
@@ -1237,4 +1244,341 @@ function drawSvgPathPoints(p) {
     }
   }
   p.pop();
+}
+
+
+
+
+
+// ===============================================
+// 작업 영역 검증 및 자동 스케일 조정
+// ===============================================
+
+/**
+ * SVG 포인트가 실제 작업 영역 내에 들어가는지 검증하고
+ * 필요시 자동으로 스케일을 조정합니다.
+ */
+function fitSvgPointsToWorkspaceSafe(points) {
+  if (!points || !points.length) return [];
+
+  const Lsum = link1Length + link2Length;
+  
+  // 1) SVG 원본 좌표의 bounding box
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+
+  let maxR = 0;
+  for (const p of points) {
+    const dx = p.x - cx;
+    const dy = p.y - cy;
+    maxR = Math.max(maxR, Math.hypot(dx, dy));
+  }
+  if (maxR < 1e-6) maxR = 1.0;
+
+  // 2) 초기 스케일 계산
+  const safetyMargin = 0.85; // 작업반경의 85%만 사용 (안전 여유)
+  const maxReach = Lsum * safetyMargin;
+  let scaleSvg = (maxReach * drawScale) / maxR;
+
+  // 3) 그림 중심 위치
+  const drawCx = baseX;
+  const drawCy = baseY + Lsum * 0.6;
+
+  // 4) 반복적으로 IK 검증하며 스케일 조정
+  const maxIterations = 5;
+  let validScale = false;
+  
+  for (let iter = 0; iter < maxIterations; iter++) {
+    console.log(`🔍 검증 반복 ${iter + 1}/${maxIterations}, scale: ${scaleSvg.toFixed(4)}`);
+    
+    let failCount = 0;
+    let outOfRangeCount = 0;
+    
+    // 모든 포인트를 변환하고 IK 검증
+    const testPoints = points.map((p) => {
+      const dx = (p.x - cx) * scaleSvg + Xoffset;
+      const dy = (p.y - cy) * scaleSvg + Yoffset;
+      
+      return {
+        x: drawCx + dx,
+        y: drawCy + dy,
+        pen: p.pen,
+      };
+    });
+    
+    // 샘플링하여 검증 (모든 점을 다 체크하면 느리므로)
+    const sampleRate = Math.max(1, Math.floor(testPoints.length / 100));
+    
+    for (let i = 0; i < testPoints.length; i += sampleRate) {
+      const pt = testPoints[i];
+      
+      // IK 계산 시도
+      const ik = inverseKinematics2DOF(pt.x, pt.y, 0, 0);
+      
+      if (!ik) {
+        failCount++;
+        continue;
+      }
+      
+      // 관절 제한 확인
+      if (ik.joint1 < J1_MIN || ik.joint1 > J1_MAX ||
+          ik.joint2 < J2_MIN || ik.joint2 > J2_MAX) {
+        outOfRangeCount++;
+      }
+    }
+    
+    const sampleSize = Math.ceil(testPoints.length / sampleRate);
+    const failRate = failCount / sampleSize;
+    const outRate = outOfRangeCount / sampleSize;
+    
+    console.log(`   IK 실패: ${failCount}/${sampleSize} (${(failRate*100).toFixed(1)}%)`);
+    console.log(`   범위 초과: ${outOfRangeCount}/${sampleSize} (${(outRate*100).toFixed(1)}%)`);
+    
+    // 성공 조건: 실패율 5% 이하
+    if (failRate < 0.05 && outRate < 0.05) {
+      validScale = true;
+      console.log(`✅ 적합한 스케일 발견!`);
+      break;
+    }
+    
+    // 스케일 축소 (10%씩)
+    scaleSvg *= 0.9;
+  }
+  
+  if (!validScale) {
+    console.warn(`⚠️ 완벽한 스케일을 찾지 못했지만 최선의 스케일로 진행합니다.`);
+  }
+  
+  // 5) 최종 변환
+  const result = points.map((p) => {
+    const dx = (p.x - cx) * scaleSvg + Xoffset;
+    const dy = (p.y - cy) * scaleSvg + Yoffset;
+    
+    return {
+      x: drawCx + dx,
+      y: drawCy + dy,
+      pen: p.pen,
+    };
+  });
+  
+  console.log(`📐 최종 스케일: ${scaleSvg.toFixed(4)}`);
+  return result;
+}
+
+// ===============================================
+// IK 함수도 개선: 도달 불가능한 경우 null 반환
+// ===============================================
+function inverseKinematics2DOFSafe(targetX, targetY, prevJ1Deg, prevJ2Deg) {
+  const L1 = link1Length;
+  const L2 = link2Length;
+
+  const dx = targetX - baseX;
+  const dy = targetY - baseY;
+  let d = Math.hypot(dx, dy);
+  if (d < 1e-6) d = 1e-6;
+
+  // 작업 영역 체크
+  const maxReach = L1 + L2 - 1e-3;
+  const minReach = Math.abs(L1 - L2) + 1e-3;
+  
+  // ❌ 도달 불가능하면 null 반환
+  if (d > maxReach || d < minReach) {
+    return null;
+  }
+
+  let cos2 = (d * d - L1 * L1 - L2 * L2) / (2 * L1 * L2);
+  cos2 = Math.max(-1, Math.min(1, cos2));
+
+  const theta2Abs = Math.acos(cos2);
+  const theta2List = [theta2Abs, -theta2Abs];
+
+  function solve(theta2_fk) {
+    const k1 = L1 + L2 * Math.cos(theta2_fk);
+    const k2 = L2 * Math.sin(theta2_fk);
+    const theta1_fk = Math.atan2(dy, dx) - Math.atan2(k2, k1);
+    const theta1 = theta1_fk - upperRestAngle;
+    const theta2 = theta2_fk;
+
+    const joint1DegPhysical = -theta1 * 180 / Math.PI;
+    const joint2DegPhysical = -theta2 * 180 / Math.PI;
+
+    const joint1Deg = normalizeAngle(joint1DegPhysical);
+    const joint2Deg = normalizeAngle(joint2DegPhysical - JOINT2_OFFSET);
+
+    return { joint1: joint1Deg, joint2: joint2Deg };
+  }
+
+  const solA = solve(theta2List[0]);
+  const solB = solve(theta2List[1]);
+
+  // 관절 제한 체크: 두 해 모두 범위를 벗어나면 null
+  const aValid = (solA.joint1 >= J1_MIN && solA.joint1 <= J1_MAX &&
+                  solA.joint2 >= J2_MIN && solA.joint2 <= J2_MAX);
+  const bValid = (solB.joint1 >= J1_MIN && solB.joint1 <= J1_MAX &&
+                  solB.joint2 >= J2_MIN && solB.joint2 <= J2_MAX);
+
+  if (!aValid && !bValid) {
+    return null; // 둘 다 범위 밖
+  }
+
+  // 이전 각도가 없으면 유효한 해 반환
+  if (typeof prevJ1Deg !== "number" || typeof prevJ2Deg !== "number") {
+    return aValid ? solA : solB;
+  }
+
+  // 연속성 기준 선택 (유효한 해만 고려)
+  function score(sol) {
+    const d1 = normalizeAngle(sol.joint1 - prevJ1Deg);
+    const d2 = normalizeAngle(sol.joint2 - prevJ2Deg);
+    return d1 * d1 + d2 * d2;
+  }
+
+  if (aValid && bValid) {
+    return (score(solB) < score(solA)) ? solB : solA;
+  }
+  
+  return aValid ? solA : solB;
+}
+
+// ===============================================
+// buildMotionJsonFromSvg도 개선된 함수 사용
+// ===============================================
+function buildMotionJsonFromSvgSafe() {
+  if (jsonBuilt) return;
+  if (!svgPathPoints || svgPathPoints.length === 0) return;
+
+  console.log("🔧 motionJson 생성 시작 (안전 모드)...");
+  motionJson = [];
+
+  let curStepJ1 = 0;
+  let curStepJ2 = 0;
+  let prevPen = 0;
+
+  const j1MinStep = Math.round(J1_MIN / STEP_DEG);
+  const j1MaxStep = Math.round(J1_MAX / STEP_DEG);
+  const j2MinStep = Math.round(J2_MIN / STEP_DEG);
+  const j2MaxStep = Math.round(J2_MAX / STEP_DEG);
+
+  let prevJ1Deg = 0;
+  let prevJ2Deg = 0;
+  
+  let skippedPoints = 0;
+
+  function moveToTarget(targetJ1, targetJ2, penState) {
+    const totalDiff1 = targetJ1 - curStepJ1;
+    const totalDiff2 = targetJ2 - curStepJ2;
+    const maxDiff = Math.max(Math.abs(totalDiff1), Math.abs(totalDiff2));
+    
+    if (maxDiff === 0) {
+      if (penState !== prevPen) {
+        motionJson.push({ d1: 0, d2: 0, pen: penState });
+        prevPen = penState;
+      }
+      return;
+    }
+
+    const stepsNeeded = Math.ceil(maxDiff / MAX_STEPS_PT);
+    if (stepsNeeded > 1000) {
+      console.warn(`⚠️ 과도한 분할 감지 (${stepsNeeded})`);
+      return;
+    }
+
+    let accumulatedJ1 = 0;
+    let accumulatedJ2 = 0;
+
+    for (let i = 1; i <= stepsNeeded; i++) {
+      const t = i / stepsNeeded;
+      const targetAccJ1 = Math.round(totalDiff1 * t);
+      const targetAccJ2 = Math.round(totalDiff2 * t);
+      const d1 = targetAccJ1 - accumulatedJ1;
+      const d2 = targetAccJ2 - accumulatedJ2;
+
+      accumulatedJ1 = targetAccJ1;
+      accumulatedJ2 = targetAccJ2;
+
+      const currentPen = penState;
+
+      if (d1 !== 0 || d2 !== 0 || currentPen !== prevPen) {
+        motionJson.push({ d1, d2, pen: currentPen });
+        prevPen = currentPen;
+      }
+
+      curStepJ1 += d1;
+      curStepJ2 += d2;
+    }
+  }
+
+  // Home -> 첫 포인트
+  if (svgPathPoints.length > 0) {
+    const firstPt = svgPathPoints[0];
+    const firstIk = inverseKinematics2DOFSafe(firstPt.x, firstPt.y, 0, 0);
+
+    if (firstIk) {
+      let targetStartJ1 = Math.round(firstIk.joint1 / STEP_DEG);
+      let targetStartJ2 = Math.round(firstIk.joint2 / STEP_DEG);
+      targetStartJ1 = Math.max(j1MinStep, Math.min(j1MaxStep, targetStartJ1));
+      targetStartJ2 = Math.max(j2MinStep, Math.min(j2MaxStep, targetStartJ2));
+
+      console.log(`📍 Home(0,0) → 첫 포인트(${targetStartJ1}, ${targetStartJ2})`);
+      moveToTarget(targetStartJ1, targetStartJ2, 0);
+
+      prevJ1Deg = firstIk.joint1;
+      prevJ2Deg = firstIk.joint2;
+    } else {
+      console.error("❌ 첫 포인트가 작업 영역 밖입니다!");
+    }
+  }
+
+  // SVG 경로
+  const totalPoints = svgPathPoints.length;
+  const logInterval = Math.max(1, Math.floor(totalPoints / 10));
+
+  for (let idx = 0; idx < svgPathPoints.length; idx++) {
+    const pt = svgPathPoints[idx];
+
+    if (idx % logInterval === 0) {
+      console.log(`📊 진행: ${idx}/${totalPoints} (${Math.round(idx/totalPoints*100)}%), 스킵: ${skippedPoints}`);
+    }
+
+    const ik = inverseKinematics2DOFSafe(pt.x, pt.y, prevJ1Deg, prevJ2Deg);
+
+    if (!ik) {
+      skippedPoints++;
+      continue; // IK 실패 또는 범위 밖
+    }
+
+    let targetStepJ1 = Math.round(ik.joint1 / STEP_DEG);
+    let targetStepJ2 = Math.round(ik.joint2 / STEP_DEG);
+    
+    // 한번 더 체크
+    targetStepJ1 = Math.max(j1MinStep, Math.min(j1MaxStep, targetStepJ1));
+    targetStepJ2 = Math.max(j2MinStep, Math.min(j2MaxStep, targetStepJ2));
+
+    moveToTarget(targetStepJ1, targetStepJ2, pt.pen);
+
+    prevJ1Deg = ik.joint1;
+    prevJ2Deg = ik.joint2;
+  }
+
+  jsonBuilt = true;
+  
+  console.log(`✅ motionJson 생성 완료!`);
+  console.log(`   - 총 ${motionJson.length}개 명령`);
+  console.log(`   - 처리된 포인트: ${totalPoints - skippedPoints}/${totalPoints}`);
+  console.log(`   - 스킵된 포인트: ${skippedPoints} (${(skippedPoints/totalPoints*100).toFixed(1)}%)`);
+  console.log(`   - 모든 움직임 ≤ ${MAX_STEPS_PT} step 보장`);
+  console.log("");
+  console.log("=== JSON 출력 시작 ===");
+  console.log(JSON.stringify(motionJson));
+  console.log("=== JSON 출력 끝 ===");
 }
