@@ -138,6 +138,7 @@ function openRobotPopup() {
   w2custompopup.open(option);
 }
 
+
 function playJsonStep() {
   if (jsonIndex >= motionJson.length) return;
 
@@ -1047,6 +1048,32 @@ function quantizeToStep(x) {
 //p5 draw 함수
 function drawSimulator(p) {
   debugFrame++;
+
+  const mode = $('mode').d;
+
+  if (mode === 0) {
+    // ---------- 수동 모드 ----------
+    // 자동 재생 끄기
+    isPlaying    = false;
+    useJsonMotion = false;
+    useSvgAsMotion = false;
+
+    // 대시보드에서 조절한 엔코더 값을 현재 각도로 사용
+    // (이미 deg 단위면 그대로, 아니면 STEP_DEG 곱해서 바꿔줘)
+    const enc1 = $('encoder.joint_1').d;
+    const enc2 = $('encoder.joint_2').d;
+
+    currentAngleJoint1 = normalizeAngle(enc1);
+    currentAngleJoint2 = normalizeAngle(enc2);
+
+  } else if (mode === 1) {
+    // ---------- 자동 모드 ----------
+    isPlaying      = true;
+    useJsonMotion  = true;   // JSON 재생 기준
+    useSvgAsMotion = false;  // SVG 직접 모션은 끄는 상태라면 그대로
+    // (만약 SVG 직접 재생 쓰고 싶으면 여기서 true/false 조합 바꾸면 됨)
+    
+  }
 
   // 배경
   p.background(245);
