@@ -1,8 +1,8 @@
 class Monkey{
     #minEncoderJoint1 = -30;
     #maxEncoderJoint1 = 180;
-    #minEncoderJoint2 = 40;
-    #maxEncoderJoint2 = 140;
+    #minEncoderJoint2 = -100;
+    #maxEncoderJoint2 = 30;
     #angleSpeedOffset = 10;
     #speedJointOffset = 10;
     // constructor 
