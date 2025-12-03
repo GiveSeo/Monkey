@@ -40,7 +40,6 @@ let STEP          = 2; // SVG 길이 기준 샘플링 단위(px)
 let FILENAME      = "Cat.svg";
 let drawScale     = 0.4;   // SVG → 로봇 스케일
 let svgPathPoints = [];    // 최종: 로봇 좌표계 (x, y, pen)
-let showSvgPath   = false; // 파란선 표시 여부
 
 
 // scale x,y offset
@@ -52,10 +51,6 @@ let upperRestAngle = 0; // upperarm 이미지 기울어진 각도
 let foreRestAngle  = 0; // forearm 이미지 기울어진 각도
 
 // SVG를 모션 기준으로 쓸지 여부 + 인덱스/속도
-let useSvgAsMotion  = true;
-let svgIndex        = 0;
-let svgFrameSkip    = 2; // 숫자 줄이면 더 빨리 움직임
-let svgFrameCounter = 0;
 
 // 로봇 관련 전역 변수
 let canvasWidth, canvasHeight;
@@ -72,8 +67,6 @@ let currentPen         = 0; // 0: 펜 업, 1: 펜 다운
 
 let targetAngleJoint1 = 0;
 let targetAngleJoint2 = 0;
-let joint1Moving = false;
-let joint2Moving = false;
 const ANGLE_THRESHOLD = 0.5; // 도달 판정 임계값 (도)
 
 // 관절 범위 (path로 인해 한번 이상 이동해야 정상적인 관절 범위 확인 가능)
@@ -89,16 +82,11 @@ const imageScale = 0.5;  // PNG 이미지 자체 스케일
 //spine 모델에서 최솟값, 최댓값 추출
 const J1_MIN = monkey.minJoint1;
 const J1_MAX = monkey.maxJoint1;
-const rawJ2Min = monkey.minJoint2 - JOINT2_OFFSET;
-const rawJ2Max = monkey.maxJoint2 - JOINT2_OFFSET;
-
-// 부호 뒤집기
-const j2FlipMin = -rawJ2Min;
-const j2FlipMax = -rawJ2Max;
 
 // 진짜 최소/최대 정렬
-const J2_MIN = Math.min(-j2FlipMin, -j2FlipMax);
-const J2_MAX = Math.max(-j2FlipMin, -j2FlipMax);
+const J2_MIN = monkey.minJoint2; 
+const J2_MAX = monkey.maxJoint2;
+
 
 // 이미지 기준 팔 관절 픽셀 좌표 (길이 구하거나, 각도 측정시 필요)
 const TOP_JOINT_X = 220;
@@ -399,7 +387,6 @@ function setupSimulator(p) {
 
     // ✅ 2) 시뮬레이터를 JSON 기준으로 돌려보고 싶다면:
     startJsonPlayback();
-    useSvgAsMotion = false; // SVG 모션 끄고 JSON 모션만 사용
   });
 
   // 팝업, 캔버스 크기 조정
@@ -1056,7 +1043,6 @@ function drawSimulator(p) {
     // 자동 재생 끄기
     isPlaying    = false;
     useJsonMotion = false;
-    useSvgAsMotion = false;
 
     // 대시보드에서 조절한 엔코더 값을 현재 각도로 사용
     // (이미 deg 단위면 그대로, 아니면 STEP_DEG 곱해서 바꿔줘)
@@ -1070,8 +1056,6 @@ function drawSimulator(p) {
     // ---------- 자동 모드 ----------
     isPlaying      = true;
     useJsonMotion  = true;   // JSON 재생 기준
-    useSvgAsMotion = false;  // SVG 직접 모션은 끄는 상태라면 그대로
-    // (만약 SVG 직접 재생 쓰고 싶으면 여기서 true/false 조합 바꾸면 됨)
     
   }
 
@@ -1087,14 +1071,9 @@ function drawSimulator(p) {
   p.scale(scale);
 
   // 1) 모션 소스 선택 (JSON or SVG)
-  if (isPlaying) {
-    if (useJsonMotion && motionJson.length > 0) {
-      // 로봇 JSON 기준 재생
-      playJsonStep();
-    } else if (useSvgAsMotion && svgPathPoints.length > 0) {
-      // 기존 SVG + IK 기반 재생
-      playSvgMotion(p);
-    }
+  if (isPlaying&&useJsonMotion && motionJson.length > 0) {
+    // 로봇 JSON 기준 재생
+    playJsonStep();
   }
 
   // 2) Forward Kinematics (현재 joint 각도로 포즈 계산)
@@ -1187,11 +1166,6 @@ const y3 = y2 + link2Length * p.sin(theta1_fk + theta2);
 
   p.text(isPlaying ? "Playing" : "Paused", 50, 150);
   p.text(`Pen: ${currentPen}`,              50, 170);
-  p.text(`SVG pts: ${svgPathPoints.length}`,50, 190);
-  p.text(`SVG idx: ${svgIndex}`,            50, 210);
-  p.text(`SVG motion: ${useSvgAsMotion}`,   50, 230);
-  p.text(`J1 moving: ${joint1Moving}`,      50, 250);
-  p.text(`J2 moving: ${joint2Moving}`,      50, 270);
   p.text(`MIN J1: ${minJoint1}`,            50, 290);
   p.text(`MAX J1: ${maxJoint1}`,            50, 310);
   p.text(`MIN J2: ${minJoint2}`,            50, 330);
@@ -1201,89 +1175,6 @@ const y3 = y2 + link2Length * p.sin(theta1_fk + theta2);
   // 필요하면 여기서 showSvgPath로 파란 SVG 궤적도 표시 가능
 }
 
-function playSvgMotion(p) {
-  const pt = svgPathPoints[svgIndex];
-
-  const dynamicSkip = (pt.pen === 0 ? 1 : svgFrameSkip);
-  svgFrameCounter++;
-
-  if (svgFrameCounter >= dynamicSkip) {
-    svgFrameCounter = 0;
-    
-    // 다음 포인트로 이동 (joint1, joint2가 모두 목표에 도달했을 때만)
-    if (!joint1Moving && !joint2Moving) {
-      svgIndex = Math.min(svgIndex + 1, svgPathPoints.length - 1);
-      
-      const ik = inverseKinematics2DOF(
-        pt.x,
-        pt.y,
-        currentAngleJoint1,
-        currentAngleJoint2
-      );
-
-      let j1 = quantizeToStep(ik.joint1);
-      let j2 = quantizeToStep(ik.joint2);
-
-      j1 = Math.max(J1_MIN, Math.min(J1_MAX, j1));
-      j2 = Math.max(J2_MIN, Math.min(J2_MAX, j2));
-
-      targetAngleJoint1 = j1;
-      targetAngleJoint2 = j2;
-      joint1Moving = true;
-      currentPen = pt.pen;
-    }
-  }
-
-  // joint1 제어
-  if (joint1Moving) {
-    const diff1 = targetAngleJoint1 - currentAngleJoint1;
-
-    if (Math.abs(diff1) < ANGLE_THRESHOLD) {
-      currentAngleJoint1 = targetAngleJoint1;
-      joint1Moving = false;
-      joint2Moving = true;
-    } else {
-      const step1 = Math.sign(diff1) * Math.min(Math.abs(diff1), 2.0);
-      currentAngleJoint1 += step1;
-    }
-
-    $("encoder.joint_1").d = currentAngleJoint1;
-  }
-
-  // joint2 제어
-  if (joint2Moving) {
-    const diff2 = targetAngleJoint2 - currentAngleJoint2;
-
-    if (Math.abs(diff2) < ANGLE_THRESHOLD) {
-      currentAngleJoint2 = targetAngleJoint2;
-      joint2Moving = false;
-    } else {
-      const step2 = Math.sign(diff2) * Math.min(Math.abs(diff2), 2.0);
-      currentAngleJoint2 += step2;
-    }
-
-    $("encoder.joint_2").d = currentAngleJoint2;
-  }
-}
-
-// 파란 선 (궤적) 원본 궤적 그리기
-function drawSvgPathPoints(p) {
-  if (!svgPathPoints || svgPathPoints.length < 2) return;
-
-  p.push();
-  p.stroke(0, 0, 255);
-  p.strokeWeight(2);
-  p.noFill();
-
-  for (let i = 1; i < svgPathPoints.length; i++) {
-    const prev = svgPathPoints[i - 1];
-    const curr = svgPathPoints[i];
-    if (prev.pen === 1 && curr.pen === 1) {
-      p.line(prev.x, prev.y, curr.x, curr.y);
-    }
-  }
-  p.pop();
-}
 
 
 
