@@ -89,8 +89,16 @@ const imageScale = 0.5;  // PNG 이미지 자체 스케일
 //spine 모델에서 최솟값, 최댓값 추출
 const J1_MIN = monkey.minJoint1;
 const J1_MAX = monkey.maxJoint1;
-const J2_MIN = (monkey.minJoint2 - JOINT2_OFFSET);
-const J2_MAX = (monkey.maxJoint2- JOINT2_OFFSET);
+const rawJ2Min = monkey.minJoint2 - JOINT2_OFFSET;
+const rawJ2Max = monkey.maxJoint2 - JOINT2_OFFSET;
+
+// 부호 뒤집기
+const j2FlipMin = -rawJ2Min;
+const j2FlipMax = -rawJ2Max;
+
+// 진짜 최소/최대 정렬
+const J2_MIN = Math.min(-j2FlipMin, -j2FlipMax);
+const J2_MAX = Math.max(-j2FlipMin, -j2FlipMax);
 
 // 이미지 기준 팔 관절 픽셀 좌표 (길이 구하거나, 각도 측정시 필요)
 const TOP_JOINT_X = 220;
@@ -993,15 +1001,19 @@ function solve(theta2_fk) {
 
   const theta1_fk = Math.atan2(dy, dx) - Math.atan2(k2, k1);
 
-  const theta1 = theta1_fk - upperRestAngle; // FK때 더해준 각도 다시 빼기
+  const theta1 = theta1_fk - upperRestAngle;
   const theta2 = theta2_fk;
 
-  const joint1DegPhysical = -theta1 * 180 / Math.PI;  // 기존 정의랑 같음
+  const joint1DegPhysical = -theta1 * 180 / Math.PI;
   const joint2DegPhysical = -theta2 * 180 / Math.PI;
 
-  // 🔸 새 기준: joint2_new = joint2_physical - 140
-  const joint1Deg = joint1DegPhysical;
-  const joint2Deg = joint2DegPhysical - JOINT2_OFFSET;
+  // 기존 내부 기준 (시계 +, 반시계 -)
+  const joint1Old = joint1DegPhysical;
+  const joint2Old = -(joint2DegPhysical - JOINT2_OFFSET);
+
+  // ✅ 새 논리 기준: 시계 -, 반시계 +
+  const joint1Deg = joint1Old;        // joint1은 그대로 사용
+  const joint2Deg = -joint2Old;       // 부호 반전
 
   return { joint1: joint1Deg, joint2: joint2Deg };
 }
@@ -1063,7 +1075,7 @@ const theta1 = p.radians(currentAngleJoint1) * -1;
 
 // 🔸 joint2: 새 기준(0이었던 곳이 140)이므로,
 //    물리각 = currentAngleJoint2 + 140
-const physicalJ2 = currentAngleJoint2 + JOINT2_OFFSET;
+const physicalJ2 =   currentAngleJoint2 +  JOINT2_OFFSET;
 const theta2 = p.radians(physicalJ2) * -1;
 
 const theta1_fk = theta1 + upperRestAngle;
@@ -1402,21 +1414,27 @@ function inverseKinematics2DOFSafe(targetX, targetY, prevJ1Deg, prevJ2Deg) {
   const theta2Abs = Math.acos(cos2);
   const theta2List = [theta2Abs, -theta2Abs];
 
-  function solve(theta2_fk) {
-    const k1 = L1 + L2 * Math.cos(theta2_fk);
-    const k2 = L2 * Math.sin(theta2_fk);
-    const theta1_fk = Math.atan2(dy, dx) - Math.atan2(k2, k1);
-    const theta1 = theta1_fk - upperRestAngle;
-    const theta2 = theta2_fk;
+function solve(theta2_fk) {
+  const k1 = L1 + L2 * Math.cos(theta2_fk);
+  const k2 = L2 * Math.sin(theta2_fk);
+  const theta1_fk = Math.atan2(dy, dx) - Math.atan2(k2, k1);
+  const theta1 = theta1_fk - upperRestAngle;
+  const theta2 = theta2_fk;
 
-    const joint1DegPhysical = -theta1 * 180 / Math.PI;
-    const joint2DegPhysical = -theta2 * 180 / Math.PI;
+  const joint1DegPhysical = -theta1 * 180 / Math.PI;
+  const joint2DegPhysical = -theta2 * 180 / Math.PI;
 
-    const joint1Deg = normalizeAngle(joint1DegPhysical);
-    const joint2Deg = normalizeAngle(joint2DegPhysical - JOINT2_OFFSET);
+  // 기존 내부 기준
+  const joint1Old = joint1DegPhysical;
+  const joint2Old = -(joint2DegPhysical - JOINT2_OFFSET);
 
-    return { joint1: joint1Deg, joint2: joint2Deg };
-  }
+  // 새 논리 기준: 시계 -, 반시계 +
+  const joint1Deg = normalizeAngle(joint1Old);
+  const joint2Deg = normalizeAngle(-joint2Old);
+
+  return { joint1: joint1Deg, joint2: joint2Deg };
+}
+
 
   const solA = solve(theta2List[0]);
   const solB = solve(theta2List[1]);
@@ -1490,7 +1508,7 @@ function buildMotionJsonFromSvgSafe() {
     const stepsNeeded = Math.ceil(maxDiff / MAX_STEPS_PT);
     if (stepsNeeded > 1000) {
       console.warn(`⚠️ 과도한 분할 감지 (${stepsNeeded})`);
-      return;
+      stepsNeeded = 1000;
     }
 
     let accumulatedJ1 = 0;
