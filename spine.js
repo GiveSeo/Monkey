@@ -133,9 +133,11 @@ async function setup(spine) {
     return wait(0x7fffffff);
   };
 
-  $('mode').d = 1; // 각도 기반 모드
+  $('mode').d = 0; // 각도 기반 모드
   $('joint.max_speed').d = 100;
   $('joint.angles').d = [0, 0];
+  $('encoder.joint_1').d = 0;
+  $('encoder.joint_2').d = 0;
   await wait(3000);
 }
 
@@ -161,4 +163,6 @@ function deserialize() {
 }
 
 // put control code here, to run repeatedly
-function loop() {}
+function loop() {
+    control()
+}
