@@ -1036,11 +1036,11 @@ function drawSimulator(p) {
     // 대시보드에서 조절한 엔코더 값을 현재 각도로 사용
     // (이미 deg 단위면 그대로, 아니면 STEP_DEG 곱해서 바꿔줘)
     const enc1 = $('encoder.joint_1').d;
-    const enc2 = $('encoder.joint_2').d;
-    console.log(enc1," ",enc2);
+    //const enc2 = $('encoder.joint_2').d;
+    //console.log(enc1," ",enc2);
 
     currentAngleJoint1 = normalizeAngle(enc1);
-    currentAngleJoint2 = normalizeAngle(enc2);
+    //currentAngleJoint2 = normalizeAngle(enc2);
 
   } else if (mode === 1) {
     // ---------- 자동 모드 ----------
