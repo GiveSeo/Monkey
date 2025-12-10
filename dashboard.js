@@ -1,5 +1,7 @@
 // === J1 / J2 전용 대시보드 ===
 
+// 심플 슬라이더 생성기 (HTML range)
+
 // === 제어 로직 ===
 let init = false;
 // angles[0] = J1, angles[1] = J2
@@ -73,62 +75,55 @@ function dashboard() {
   const sliderWidth = 260;
   const sliderX = 120;
 
-  // === J1 슬라이더 ===
-  const J1 = frame.append("g");
-  J1.append("text")
-    .attr("x", 15)
-    .attr("y", 115)
-    .attr("font-size", "12px")
-    .text("J1 (deg)");
+    // J1 슬라이더
+const J1 = frame.append("g");
+J1.append("text")
+  .attr("x", 15)
+  .attr("y", 115)
+  .attr("font-size", "12px")
+  .text("J1 (deg)");
 
-  createSlider(J1, [sliderWidth, sliderX, 105], "angle_J1", -30, 180, 0);
+createSlider(J1, [sliderWidth, sliderX, 105], "angle_J1", -30, 180, 0);
 
-  //  J1 값 표시 UI 추가
-  J1.append("foreignObject")
-    .attr("x", sliderX + sliderWidth + 5)
-    .attr("y", 105)
-    .attr("width", 40)
-    .attr("height", 30)
-    .html(`<div id="angle_J1_val" 
+//  J1 값 표시 UI 추가
+J1.append("foreignObject")
+  .attr("x", sliderX + sliderWidth + 5)
+  .attr("y", 105)
+  .attr("width", 40)
+  .attr("height", 30)
+  .html(`<div id="angle_J1_val" 
           style="font-size:14px; padding-top:4px;">0°</div>`);
 
-  //  실시간 업데이트 이벤트 + encoder 즉시 반영 ⭐
-  select("#angle_J1").on("input", function () {
-    const v = parseInt(this.value, 10);
-    select("#angle_J1_val").html(`${v}°`);
+//  실시간 업데이트 이벤트
+select("#angle_J1").on("input", function () {
+  select("#angle_J1_val").html(`${this.value}°`);
+});
 
-    // 슬라이더 값 → encoder 바로 적용
-    $("encoder.joint_1").d = v;
-  });
 
-  // === J2 슬라이더 ===
-  const J2 = frame.append("g");
-  J2.append("text")
-    .attr("x", 15)
-    .attr("y", 70)
-    .attr("font-size", "12px")
-    .text("J2 (deg)");
+    // J2 슬라이더
+const J2 = frame.append("g");
+J2.append("text")
+  .attr("x", 15)
+  .attr("y", 70)
+  .attr("font-size", "12px")
+  .text("J2 (deg)");
 
-  createSlider(J2, [sliderWidth, sliderX, 60], "angle_J2", -90, 10, 0);
+createSlider(J2, [sliderWidth, sliderX, 60], "angle_J2", -90, 10, 0);
 
-  //  J2 값 표시 UI 추가
-  J2.append("foreignObject")
-    .attr("x", sliderX + sliderWidth + 5)
-    .attr("y", 60)
-    .attr("width", 40)
-    .attr("height", 30)
-    .html(`<div id="angle_J2_val" 
+//  J2 값 표시 UI 추가
+J2.append("foreignObject")
+  .attr("x", sliderX + sliderWidth + 5)
+  .attr("y", 60)
+  .attr("width", 40)
+  .attr("height", 30)
+  .html(`<div id="angle_J2_val" 
           style="font-size:14px; padding-top:4px;">0°</div>`);
 
-  //  실시간 업데이트 이벤트 + encoder 즉시 반영 ⭐
-  select("#angle_J2").on("input", function () {
-    const v = parseInt(this.value, 10);
-    select("#angle_J2_val").html(`${v}°`);
+//  실시간 업데이트 이벤트
+select("#angle_J2").on("input", function () {
+  select("#angle_J2_val").html(`${this.value}°`);
+});
 
-    // 슬라이더 값 → encoder 바로 적용
-    currentAngleJoint2 = v;
-    $("encoder.joint_2").d = v;
-  });
 
   // === Pen Up/Down 버튼 ===
   const penBtn = frame.append("g");
@@ -152,10 +147,11 @@ function dashboard() {
   // Erase 버튼
   const fkBtn = frame.append("g");
   createButton(fkBtn, [300, 50, 240], "erase_btn", "Erase");
-
+ 
   select("#erase_btn").on("click", () => {
-    trailLayer.clear();
+      trailLayer.clear();
   });
+
 
   // SVG Draw 버튼
   const drawBtn = frame.append("g");
@@ -164,12 +160,26 @@ function dashboard() {
   select("#svg_draw_btn").on("click", () => {
     // 재생 시작
     $("mode").d = 1;
+    startJsonPlayback();
+    $("encoder.joint_1").d = currentAngleJoint1;
+    $("encoder.joint_2").d = currentAngleJoint2;
     console.log("SVG drawing mode activated");
+  });
+
+  const manualBtn = frame.append("g");
+  createButton(manualBtn, [300, 50, 320], "draw_manual_btn", "Draw Manual");
+
+  select("#draw_manual_btn").on("click", () => {
+    // 재생 시작
+    $("mode").d = 0;
+    currentPen = 0;
+
+    console.log("manual drawing mode activated");
   });
 }
 
+
 function control() {
-  console.log("1");
   // 1) 첫 호출에서 엔코더 값으로 초기화
   if (!init) {
     init = true;
@@ -182,11 +192,9 @@ function control() {
     // 슬라이더에 현재 각도 반영
     if (select("#angle_J1").node()) {
       select("#angle_J1").property("value", angles[0]);
-      select("#angle_J1_val").html(`${angles[0]}°`);
     }
     if (select("#angle_J2").node()) {
       select("#angle_J2").property("value", angles[1]);
-      select("#angle_J2_val").html(`${angles[1]}°`);
     }
 
     // 속도 기본값 100
@@ -195,13 +203,12 @@ function control() {
     }
   }
 
-  // ⚠️ encoder는 이제 슬라이더 이벤트에서 바로 세팅하니까,
-  // 여기서는 굳이 다시 덮어 쓸 필요 없음.
-  // 필요하면 angles[]만 유지용으로 업데이트해도 됨.
-
-  // 3) 속도 슬라이더 → joint.max_speed
-  if (select("#angle_speed").node()) {
-    $("joint.max_speed").d =
-      parseInt(select("#angle_speed").property("value"), 10) || 100;
+  // 2) 매 프레임마다 슬라이더 값 읽어서 angles[] 업데이트
+  if (select("#angle_J1").node()) {
+    $("encoder.joint_1").d = parseInt(select("#angle_J1").property("value"));
   }
+  if (select("#angle_J2").node()) {
+    $("encoder.joint_2").d = parseInt(select("#angle_J2").property("value"));
+  }
+
 }

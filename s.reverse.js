@@ -39,14 +39,14 @@ const JOINT2_OFFSET = 143; // joint2가 0도일 때, 팔이 ㄷ자 모양이 되
 
 
 let STEP          = 2; // SVG 길이 기준 샘플링 단위(px)
-let FILENAME      = "Cat.svg"; // 그릴 SVG 파일 이름
+let FILENAME      = "60square.svg"; // 그릴 SVG 파일 이름
 let drawScale     = 0.4;   // SVG → 로봇 스케일
 let svgPathPoints = [];    // 최종: 로봇 좌표계 (x, y, pen)
 
 
 // scale x,y offset
 let Xoffset = +140;
-let Yoffset = -50;
+let Yoffset = -70;
 
 // 이미지 기준 기본 각도
 let upperRestAngle = 0; // upperarm 이미지 기울어진 각도
