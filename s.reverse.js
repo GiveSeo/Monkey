@@ -13,6 +13,9 @@ function normalizeAngle(angle) {
   while (angle < -180) angle += 360;
   return angle;
 }
+// 시간 보장 변수
+let lastJsonStepTime = 0;
+const JSON_STEP_MS = 1;
 
 // =======================
 // 로봇 JSON 관련 전역
@@ -24,7 +27,6 @@ function normalizeAngle(angle) {
 //   pen: 0(업), 1(다운)
 let motionJson    = [];
 let jsonBuilt     = false;
-let useJsonMotion = false; // 기본은 SVG 모션 사용
 let jsonIndex     = 0;
 
 // =======================
@@ -32,12 +34,12 @@ let jsonIndex     = 0;
 // =======================
 let STEP_DEG = 0.01; // 1스탭당 몇도인지
 const MAX_STEPS_PT   = 7;                 // point -> point 최대 7 step
-const MAX_DELTA_DEG  = STEP_DEG * MAX_STEPS_PT; // 0.08도
-const JOINT2_OFFSET = 140;
+const MAX_DELTA_DEG  = STEP_DEG * MAX_STEPS_PT; // 0.07도
+const JOINT2_OFFSET = 143; // joint2가 0도일 때, 팔이 ㄷ자 모양이 되도록 오프셋 각도
 
 
 let STEP          = 2; // SVG 길이 기준 샘플링 단위(px)
-let FILENAME      = "Cat.svg";
+let FILENAME      = "Cat.svg"; // 그릴 SVG 파일 이름
 let drawScale     = 0.4;   // SVG → 로봇 스케일
 let svgPathPoints = [];    // 최종: 로봇 좌표계 (x, y, pen)
 
@@ -61,13 +63,9 @@ let link1Length, link2Length;
 let imgTop, imgUpper, imgFore;
 let topPath, upperPath, forePath;
 
-let currentAngleJoint1 = -90;
-let currentAngleJoint2 = 0;
+let currentAngleJoint1 = 0; // 로봇 팔 joint1 각도
+let currentAngleJoint2 = 0; // 로봇 팔 joint2 각도
 let currentPen         = 0; // 0: 펜 업, 1: 펜 다운
-
-let targetAngleJoint1 = 0;
-let targetAngleJoint2 = 0;
-const ANGLE_THRESHOLD = 0.5; // 도달 판정 임계값 (도)
 
 // 관절 범위 (path로 인해 한번 이상 이동해야 정상적인 관절 범위 확인 가능)
 let minJoint1 =  1e9;
@@ -90,7 +88,7 @@ const J2_MAX = monkey.maxJoint2;
 
 // 이미지 기준 팔 관절 픽셀 좌표 (길이 구하거나, 각도 측정시 필요)
 const TOP_JOINT_X = 220;
-const TOP_JOINT_Y = 477;
+const TOP_JOINT_Y = 547;
 
 const UPPER_JOINT_BASE_X  = 747;
 const UPPER_JOINT_BASE_Y  = 226;
@@ -103,8 +101,7 @@ const FORE_PEN_X         = 778;
 const FORE_PEN_Y         = 612;
 
 // 재생 관련 상태
-let isPlaying   = true;
-let trailPoints = []; // 디버그용
+let isPlaying   = false;
 let debugFrame  = 0;
 
 // 궤적을 '구워둘' 레이어 & 이전 펜 위치(화면 좌표 기준)
@@ -128,7 +125,9 @@ function openRobotPopup() {
 
 
 function playJsonStep() {
-  if (jsonIndex >= motionJson.length) return;
+  if (jsonIndex >= motionJson.length){
+    return;
+  }
 
   const cmd = motionJson[jsonIndex];
 
@@ -158,8 +157,7 @@ function startJsonPlayback(jsonData) {
     motionJson = jsonData;
   }
   jsonIndex     = 0;
-  useJsonMotion = true;
-  isPlaying     = true;
+  isPlaying     = false;
 
   // 초기화: 홈에서 시작한다고 가정 (필요하면 홈 각도로 바꾸기)
   currentAngleJoint1 = 0;
@@ -179,7 +177,7 @@ function buildMotionJsonFromSvg() {
   if (jsonBuilt) return;
   if (!svgPathPoints || svgPathPoints.length === 0) return;
 
-  console.log("motionJson 생성 시작 (안전 모드)...");
+  console.log("motionJson 생성");
   motionJson = [];
 
   let curStepJ1 = 0;
@@ -210,10 +208,6 @@ function buildMotionJsonFromSvg() {
     }
 
     let stepsNeeded = Math.ceil(maxDiff / MAX_STEPS_PT);
-    if (stepsNeeded > 1000) {
-      console.warn(`과도한 분할 감지 (${stepsNeeded})`);
-      stepsNeeded = 1000;
-    }
 
     let accumulatedJ1 = 0;
     let accumulatedJ2 = 0;
@@ -290,7 +284,10 @@ function buildMotionJsonFromSvg() {
     prevJ1Deg = ik.joint1;
     prevJ2Deg = ik.joint2;
   }
-
+  if (prevPen !== 0) {
+    motionJson.push({ d1: 0, d2: 0, pen: 0 });
+    prevPen = 0;
+  }
   jsonBuilt = true;
   
   console.log(`motionJson 생성 완료!`);
@@ -1031,22 +1028,16 @@ function drawSimulator(p) {
     // ---------- 수동 모드 ----------
     // 자동 재생 끄기
     isPlaying    = false;
-    useJsonMotion = false;
-
     // 대시보드에서 조절한 엔코더 값을 현재 각도로 사용
-    // (이미 deg 단위면 그대로, 아니면 STEP_DEG 곱해서 바꿔줘)
     const enc1 = $('encoder.joint_1').d;
-    //const enc2 = $('encoder.joint_2').d;
-    //console.log(enc1," ",enc2);
+    const enc2 = $('encoder.joint_2').d;
 
     currentAngleJoint1 = normalizeAngle(enc1);
-    //currentAngleJoint2 = normalizeAngle(enc2);
+    currentAngleJoint2 = normalizeAngle(enc2);
 
   } else if (mode === 1) {
     // ---------- 자동 모드 ----------
     isPlaying      = true;
-    useJsonMotion  = true;   // JSON 재생 기준
-    
   }
 
   // 배경
@@ -1061,9 +1052,12 @@ function drawSimulator(p) {
   p.scale(scale);
 
   // 1) 모션 소스 선택 (JSON or SVG)
-  if (isPlaying&&useJsonMotion && motionJson.length > 0) {
-    // 로봇 JSON 기준 재생
-    playJsonStep();
+  if (isPlaying && motionJson.length > 0) {
+    const now = p.millis();
+    if(now - lastJsonStepTime  >= JSON_STEP_MS ) {
+      playJsonStep();
+      lastJsonStepTime  = now;  
+    }
   }
 
   // 2) Forward Kinematics (현재 joint 각도로 포즈 계산)
@@ -1161,6 +1155,4 @@ const y3 = y2 + link2Length * p.sin(theta1_fk + theta2);
   p.text(`MIN J2: ${minJoint2}`,            50, 330);
   p.text(`MAX J2: ${maxJoint2}`,            50, 350);
   p.pop();
-
-  // 필요하면 여기서 showSvgPath로 파란 SVG 궤적도 표시 가능
 }
