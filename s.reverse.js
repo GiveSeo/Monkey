@@ -29,6 +29,8 @@ let motionJson = [];
 let jsonBuilt = false;
 let jsonIndex = 0;
 
+// 실제 로봇팔 스케일
+const SVG_BOX_SIZE = 250;
 // =======================
 // 기존 전역 변수들
 // =======================
@@ -514,8 +516,12 @@ function setupSimulator(p) {
   p.loadStrings(svgPath, (lines) => {
     const svgText = lines.join("\n");
     const rawPts = extractPathPointsFromSvg(svgText, STEP); // SVG 원 좌표
-    let fittedPts = fitSvgPointsToWorkspace(rawPts); // 로봇 좌표계로 매핑
 
+    const ptsBox = normalizeToBox(rawPts); // (0,0)~(SVG_BOX_SIZE,SVG_BOX_SIZE)
+
+    const k = 1.0; 
+
+    let fittedPts = mapBoxToRobotTargets(ptsBox, k, false); // 로봇 좌표계로 매핑
     // 필요하면 거리/각도 리샘플링 추가
     fittedPts = resamplePathByAngle(fittedPts, MAX_DELTA_DEG);
 
@@ -1370,9 +1376,11 @@ function drawSimulator(p) {
   p.text(`J2: ${currentAngleJoint2.toFixed(2)} deg`, 50, 70);
   p.text(`L1: ${link1Length.toFixed(0)}px`, 50, 90);
   p.text(`L2: ${link2Length.toFixed(0)}px`, 50, 110);
+  p.text(`Pen X: ${x3.toFixed(1)} px`, 50, 130);  // ★ 추가
+  p.text(`Pen Y: ${y3.toFixed(1)} px`, 50, 150); // ★ 추가
 
-  p.text(isPlaying ? "Playing" : "Paused", 50, 150);
-  p.text(`Pen: ${currentPen}`, 50, 170);
+  p.text(isPlaying ? "Playing" : "Paused", 50, 170);
+  p.text(`Pen: ${currentPen}`, 50, 190);
   p.text(`MIN J1: ${minJoint1.toFixed(2)}`, 50, 290);
   p.text(`MAX J1: ${maxJoint1.toFixed(2)}`, 50, 310);
   p.text(`MIN J2: ${minJoint2.toFixed(2)}`, 50, 330);
@@ -1381,17 +1389,13 @@ function drawSimulator(p) {
 }
 
 
-function downloadMotionJson(filename = "motion.json") {
-  // motionJson이 [{d1:.., d2:.., pen:..}, ...] 같은 배열이라고 가정
-  const data = {
-    version: 1,
-    createdAt: new Date().toISOString(),
-    stepDeg: (typeof STEP_DEG !== "undefined" ? STEP_DEG : null),
-    jsonStepMs: (typeof JSON_STEP_MS !== "undefined" ? JSON_STEP_MS : null),
-    motion: motionJson
-  };
+function downloadMotionJson(filename = "motionJson.json") {
+  if (!motionJson || motionJson.length === 0) {
+    alert("motionJson 비어있음");
+    return;
+  }
 
-  const text = JSON.stringify(data, null, 2);
+  const text = JSON.stringify(motionJson, null, 2);
   const blob = new Blob([text], { type: "application/json;charset=utf-8" });
   const url  = URL.createObjectURL(blob);
 
@@ -1406,14 +1410,18 @@ function downloadMotionJson(filename = "motion.json") {
 }
 
 window.rebuildFromSvgText = function(svgText) {
-  // 기존 상태 초기화(필요한 것만)
   jsonBuilt = false;
   motionJson = [];
   jsonIndex = 0;
   if (typeof trailLayer !== "undefined") trailLayer.clear();
 
   const rawPts = extractPathPointsFromSvg(svgText, STEP);
-  let fittedPts = fitSvgPointsToWorkspace(rawPts);
+
+  const ptsBox = normalizeToBox(rawPts);
+
+  const k = 1.0; // 화면 230px 고정
+  let fittedPts = mapBoxToRobotTargets(ptsBox, k, false);
+
   fittedPts = resamplePathByAngle(fittedPts, MAX_DELTA_DEG);
 
   svgPathPoints = fittedPts;
@@ -1421,3 +1429,69 @@ window.rebuildFromSvgText = function(svgText) {
   buildMotionJsonFromSvg();
   startJsonPlayback();
 };
+
+
+
+
+function normalizeToBox(points) {
+  let minX = Infinity, minY = Infinity;
+  let maxX = -Infinity, maxY = -Infinity;
+
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+
+  const w = Math.max(1e-9, maxX - minX);
+  const h = Math.max(1e-9, maxY - minY);
+
+  const s = SVG_BOX_SIZE / Math.max(w, h);
+
+  // 스케일된 결과의 크기
+  const newW = w * s;
+  const newH = h * s;
+
+  // 남는 여백을 반씩 → 중앙정렬
+  const offX = (SVG_BOX_SIZE - newW) / 2;
+  const offY = (SVG_BOX_SIZE - newH) / 2;
+
+  return points.map(p => ({
+    x: (p.x - minX) * s + offX,
+    y: (p.y - minY) * s + offY,
+    pen: p.pen
+  }));
+}
+
+function fkPenXY_deg(j1Deg, j2Deg) {
+  const theta1 = (j1Deg * Math.PI / 180) * -1;
+
+  const physicalJ2 = j2Deg + JOINT2_OFFSET;
+  const theta2 = (physicalJ2 * Math.PI / 180) * -1;
+
+  const theta1_fk = theta1 + upperRestAngle;
+
+  const x2 = baseX + link1Length * Math.cos(theta1_fk);
+  const y2 = baseY + link1Length * Math.sin(theta1_fk);
+
+  const x3 = x2 + link2Length * Math.cos(theta1_fk + theta2);
+  const y3 = y2 + link2Length * Math.sin(theta1_fk + theta2);
+
+  return { x: x3, y: y3 };
+}
+
+function mapBoxToRobotTargets(points, k = 1.0, flipY = false) {
+  const home = fkPenXY_deg(0, 0);
+
+  return points.map(p => {
+    const u = p.x;
+    const v = flipY ? (SVG_BOX_SIZE - p.y) : p.y;
+
+    return {
+      x: home.x + u * k,
+      y: home.y + v * k,
+      pen: p.pen
+    };
+  });
+}

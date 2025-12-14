@@ -54,7 +54,7 @@ function createButton(parent, cfg, id, label, onClick) {
 
 // 팝업에 J1/J2/Speed 슬라이더 + 버튼 표시
 function dashboard() {
-  w2popup.resize(470, 60);
+  w2popup.resize(470, 610);
   window.onresize = () => {
     w2popup.resize(470, 610);
   };
