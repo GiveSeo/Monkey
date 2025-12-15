@@ -6,7 +6,7 @@
 let init = false;
 // angles[0] = J1, angles[1] = J2
 let angles = [0, 0];
-// 모드 전환용 변수, false = SVG, true = Monkey FK 모드
+// 모드 전환용 변수, false = SVG, true = Plutto FK 모드
 
 // 슬라이더가 지정하는 목표 각도
 let targetAngles = [0, 0];
@@ -224,8 +224,22 @@ function dashboard() {
     console.log("SVG drawing Double mode activated");
   });
 
-  createButton(frame, [200, 20, 510], "download_json_btn", "Download JSON", () => {
-    downloadMotionJson("motionJson.json"); // ✅ 이 함수는 전역에 있어야 함 (Sketch.js에 두는 걸 추천)
+  const drawAllBtm = frame.append("g");
+  createButton(drawAllBtm, [300, 50, 470], "svg_draw_all_btn", "SVG Draw All");
+
+  select("#svg_draw_all_btn").on("click", () => {
+    // 재생 시작
+    $("mode").d = 3;
+    currentPen = 0;
+    startJsonPlayback();
+    bakeAllToTrailLayer(); 
+    $("encoder.joint_1").d = currentAngleJoint1;
+    $("encoder.joint_2").d = currentAngleJoint2;
+    console.log("SVG drawing Double mode activated");
+  });
+
+  createButton(frame, [200, 20, 510], "download_txt_btn", "Download TXT", () => {
+    downloadPlotTxtDecSpace("motion_plot.txt"); // ✅ 이 함수는 전역에 있어야 함 (Sketch.js에 두는 걸 추천)
   });
 }
 // === 키보드 이벤트 처리 ===

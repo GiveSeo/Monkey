@@ -32,8 +32,10 @@ function fkPenXY_deg(j1Deg, j2Deg) {
 }
 // 시간 보장 변수
 let lastJsonStepTime = 0;
-const JSON_STEP_MS = 1;
+const JSON_STEP_MS = 10;
 
+const FAST_STEPS_PER_FRAME = 5000; // 빠른 재생시 프레임당 최대 스텝 수
+let bakedOnce = false; // 한번에 그릴 것인지 여부
 // =======================
 // 로봇 JSON 관련 전역
 // =======================
@@ -43,6 +45,7 @@ const JSON_STEP_MS = 1;
 //   d2: joint2 step 증분
 //   pen: 0(업), 1(다운)
 let motionJson = [];
+let plot;
 let jsonBuilt = false;
 let jsonIndex = 0;
 
@@ -56,7 +59,7 @@ const MAX_STEPS_PT = 7; // point -> point 최대 7 step
 const MAX_DELTA_DEG = STEP_DEG * MAX_STEPS_PT; // 0.07도
 const JOINT2_OFFSET = 143; // joint2가 0도일 때, 팔이 ㄷ자 모양이 되도록 오프셋 각도
 
-let STEP = 2; // SVG 길이 기준 샘플링 단위(px)
+let STEP = 1; // SVG 길이 기준 샘플링 단위(px)
 let FILENAME = "Cat.svg"; // 그릴 SVG 파일 이름
 let drawScale = 0.4; // SVG → 로봇 스케일
 let svgPathPoints = []; // 최종: 로봇 좌표계 (x, y, pen)
@@ -92,12 +95,12 @@ const moreHeight = 100;
 const imageScale = 0.5; // PNG 이미지 자체 스케일
 
 //spine 모델에서 최솟값, 최댓값 추출
-const J1_MIN = monkey.minJoint1;
-const J1_MAX = monkey.maxJoint1;
+const J1_MIN = plutto.minJoint1;
+const J1_MAX = plutto.maxJoint1;
 
 // 진짜 최소/최대 정렬
-const J2_MIN = monkey.minJoint2;
-const J2_MAX = monkey.maxJoint2;
+const J2_MIN = plutto.minJoint2;
+const J2_MAX = plutto.maxJoint2;
 
 // 이미지 기준 팔 관절 픽셀 좌표 (길이 구하거나, 각도 측정시 필요)
 const TOP_JOINT_X = 220;
@@ -165,12 +168,21 @@ function playJsonStep() {
   jsonIndex++;
 }
 
+function playJsonSteps(n) {
+  for (let i = 0; i < n; i++) {
+    if (jsonIndex >= motionJson.length) return false;
+    playJsonStep();
+  }
+  return true;
+}
+// 한번에 그리기 함수
 function startJsonPlayback(jsonData) {
   if (jsonData) {
     motionJson = jsonData;
   }
   jsonIndex = 0;
   isPlaying = false;
+  bakedOnce = false;
 
   // 초기화: 홈에서 시작한다고 가정 (필요하면 홈 각도로 바꾸기)
   currentAngleJoint1 = 0;
@@ -185,7 +197,51 @@ function startJsonPlayback(jsonData) {
     trailLayer.clear();
   }
 }
+function bakeAllToTrailLayer() {
+  if (bakedOnce) return;
+  bakedOnce = true;
 
+  // ✅ playback 상태만 수동 리셋
+  jsonIndex = 0;
+  currentAngleJoint1 = 0;
+  currentAngleJoint2 = 0;
+  currentPen = 0;
+
+  prevPenScreenX = null;
+  prevPenScreenY = null;
+  prevPenState = 0;
+
+  if (trailLayer) trailLayer.clear();
+
+  let prevX = null, prevY = null, prevPen = 0;
+
+  while (jsonIndex < motionJson.length) {
+    playJsonStep();
+
+    const pos = fkPenXY_deg(currentAngleJoint1, currentAngleJoint2);
+    const x = pos.x * scale;
+    const y = pos.y * scale;
+
+    if (prevX !== null && prevY !== null && prevPen === 1 && currentPen === 1) {
+      trailLayer.push();
+      trailLayer.stroke(255, 0, 0);
+      trailLayer.strokeWeight(2);
+      trailLayer.line(prevX, prevY, x, y);
+      trailLayer.pop();
+    }
+
+    prevX = x;
+    prevY = y;
+    prevPen = currentPen;
+  }
+
+  isPlaying = false;
+  $("mode").d = 0; 
+  currentPen = 0;
+  prevPenState = 0;
+  prevPenScreenX = null;
+  prevPenScreenY = null;  // ✅ 끝나면 수동 모드로
+}
 function buildMotionJsonFromSvg() {
   if (jsonBuilt) return;
   if (!svgPathPoints || svgPathPoints.length === 0) return;
@@ -220,20 +276,12 @@ function buildMotionJsonFromSvg() {
       return;
     }
 
-    let stepsNeeded = Math.ceil(maxDiff / MAX_STEPS_PT);
+    let rem1 = totalDiff1;
+    let rem2 = totalDiff2;
 
-    let accumulatedJ1 = 0;
-    let accumulatedJ2 = 0;
-
-    for (let i = 1; i <= stepsNeeded; i++) {
-      const t = i / stepsNeeded;
-      const targetAccJ1 = Math.round(totalDiff1 * t);
-      const targetAccJ2 = Math.round(totalDiff2 * t);
-      const d1 = targetAccJ1 - accumulatedJ1;
-      const d2 = targetAccJ2 - accumulatedJ2;
-
-      accumulatedJ1 = targetAccJ1;
-      accumulatedJ2 = targetAccJ2;
+    while (rem1 !== 0 || rem2 !== 0) {
+      const d1 = Math.max(-MAX_STEPS_PT, Math.min(MAX_STEPS_PT, rem1));
+      const d2 = Math.max(-MAX_STEPS_PT, Math.min(MAX_STEPS_PT, rem2));
 
       const currentPen = penState;
 
@@ -244,6 +292,9 @@ function buildMotionJsonFromSvg() {
 
       curStepJ1 += d1;
       curStepJ2 += d2;
+
+      rem1 -= d1;
+      rem2 -= d2;
     }
   }
 
@@ -320,7 +371,7 @@ function buildMotionJsonFromSvg() {
     }
 
     const out = []; // 최종 결과를 담을 배열
-    let prevPen = motionJson[0]?.pen ?? 0; // 이전 펜 상태 기억
+    let prevPen = 0; // 펜 처음은 0으로 시작(펜이 띄워져 있는 상태)
 
     for (let i = 0; i < motionJson.length; i++) {
       const cmd = motionJson[i];
@@ -460,18 +511,15 @@ function buildMotionJsonFromSvg() {
 
   // ===============================
   // 1) plotEncode
-  try {
-    const plot = plotEncode(motionJson);
+try {
+  plot = plotEncode(motionJson); // plot: number[] (각 원소 0~255)
 
-    console.log("=== plot 출력 시작 ===");
-    console.log(
-      JSON.stringify(plot.map((b) => "0x" + b.toString(16).padStart(2, "0")))
-    );
-    //console.log(JSON.stringify(plot)); // 10진수 배열
-    console.log("=== plot 출력 끝 ===");
-  } catch (err) {
-    console.error("plotEncode 오류:", err);
-  }
+  console.log("=== plot 출력 시작 (DEC) ===");
+  console.log(JSON.stringify(plot)); // ✅ 10진수 배열로 그대로 출력
+  console.log("=== plot 출력 끝 ===");
+} catch (err) {
+  console.error("plotEncode 오류:", err);
+}
 
   // ===============================
   // 2) plotDecode 테스트
@@ -616,48 +664,91 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
   function parseTransform(transformStr) {
     if (!transformStr) return null;
 
-    const m = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+    // 단위행렬
+    let M = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 
-    const parseArgs = (regex) => {
-      const match = transformStr.match(regex);
-      if (!match) return null;
-      return match[1].split(/[\s,]+/).map(parseFloat);
+    // 단일 변환 생성기
+    const I = () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
+
+    const T = (tx = 0, ty = 0) => ({ a: 1, b: 0, c: 0, d: 1, e: tx, f: ty });
+
+    const S = (sx = 1, sy = sx) => ({ a: sx, b: 0, c: 0, d: sy, e: 0, f: 0 });
+
+    const R = (deg = 0) => {
+      const rad = (deg * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      return { a: cos, b: sin, c: -sin, d: cos, e: 0, f: 0 };
     };
 
-    const t = parseArgs(/translate\(([^)]+)\)/);
-    if (t) {
-      m.e = t[0] || 0;
-      m.f = t[1] || 0;
+    const KX = (deg = 0) => {
+      const rad = (deg * Math.PI) / 180;
+      return { a: 1, b: 0, c: Math.tan(rad), d: 1, e: 0, f: 0 };
+    };
+
+    const KY = (deg = 0) => {
+      const rad = (deg * Math.PI) / 180;
+      return { a: 1, b: Math.tan(rad), c: 0, d: 1, e: 0, f: 0 };
+    };
+
+    const toNums = (s) =>
+      s
+        .trim()
+        .split(/[\s,]+/)
+        .filter(Boolean)
+        .map(parseFloat);
+
+    // transform 함수들 추출: name(args)
+    const re = /([a-zA-Z]+)\(([^)]*)\)/g;
+    let match;
+
+    while ((match = re.exec(transformStr)) !== null) {
+      const name = match[1];
+      const args = toNums(match[2]);
+
+      let m = null;
+
+      if (name === "translate") {
+        const tx = args[0] ?? 0;
+        const ty = args[1] ?? 0;
+        m = T(tx, ty);
+      } else if (name === "scale") {
+        const sx = args[0] ?? 1;
+        const sy = args[1] ?? sx;
+        m = S(sx, sy);
+      } else if (name === "rotate") {
+        const ang = args[0] ?? 0;
+        const cx = args[1];
+        const cy = args[2];
+
+        if (typeof cx === "number" && typeof cy === "number") {
+          // rotate(a cx cy) = T(cx,cy) * R(a) * T(-cx,-cy)
+          m = multiplyMatrices(T(cx, cy), multiplyMatrices(R(ang), T(-cx, -cy)));
+        } else {
+          m = R(ang);
+        }
+      } else if (name === "skewX") {
+        m = KX(args[0] ?? 0);
+      } else if (name === "skewY") {
+        m = KY(args[0] ?? 0);
+      } else if (name === "matrix") {
+        // matrix(a b c d e f)
+        if (args.length >= 6) {
+          m = { a: args[0], b: args[1], c: args[2], d: args[3], e: args[4], f: args[5] };
+        } else {
+          m = I();
+        }
+      } else {
+        // 알 수 없는 transform이면 무시
+        m = I();
+      }
+
+      // ⭐ SVG transform은 "작성된 순서대로 적용"되도록 누적:
+      // p' = m * p, 그 다음 변환이 또 있으면 (next * (m*p)) → 누적은 "앞에 곱하기"
+      M = multiplyMatrices(m, M);
     }
 
-    const s = parseArgs(/scale\(([^)]+)\)/);
-    if (s) {
-      m.a = s[0] || 1;
-      m.d = s[1] || s[0] || 1;
-    }
-
-    const r = parseArgs(/rotate\(([^)]+)\)/);
-    if (r) {
-      const angle = (r[0] * Math.PI) / 180;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      m.a = cos;
-      m.b = sin;
-      m.c = -sin;
-      m.d = cos;
-    }
-
-    const mm = parseArgs(/matrix\(([^)]+)\)/);
-    if (mm) {
-      m.a = mm[0];
-      m.b = mm[1];
-      m.c = mm[2];
-      m.d = mm[3];
-      m.e = mm[4];
-      m.f = mm[5];
-    }
-
-    return m;
+    return M;
   }
 
   function multiplyMatrices(m1, m2) {
@@ -749,12 +840,91 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
   }
 
   function rectToPath(x, y, w, h, rx, ry, m) {
-    const p1 = applyTransform(x, y, m);
-    const p2 = applyTransform(x + w, y, m);
-    const p3 = applyTransform(x + w, y + h, m);
-    const p4 = applyTransform(x, y + h, m);
-    // rx, ry는 일단 무시하고 일반 사각형으로 처리
-    return `M ${p1.x},${p1.y} L ${p2.x},${p2.y} L ${p3.x},${p3.y} L ${p4.x},${p4.y} Z`;
+    // SVG 스펙: rx/ry 하나만 주어지면 다른 하나는 동일
+    if ((rx && !ry) || (ry && !rx)) {
+      rx = rx || ry;
+      ry = ry || rx;
+    }
+    rx = rx || 0;
+    ry = ry || 0;
+
+    // rx/ry는 폭/높이의 절반을 넘을 수 없음
+    rx = Math.min(rx, w / 2);
+    ry = Math.min(ry, h / 2);
+
+    // 라운드 없는 경우: 직선 사각형
+    if (rx <= 1e-9 || ry <= 1e-9) {
+      const p1 = applyTransform(x, y, m);
+      const p2 = applyTransform(x + w, y, m);
+      const p3 = applyTransform(x + w, y + h, m);
+      const p4 = applyTransform(x, y + h, m);
+      return `M ${p1.x},${p1.y} L ${p2.x},${p2.y} L ${p3.x},${p3.y} L ${p4.x},${p4.y} Z`;
+    }
+
+    // quarter-ellipse를 cubic bezier로 근사할 때 쓰는 상수
+    // kappa = 4/3 * tan(pi/8) ≈ 0.5522847498307936
+    const K = 0.5522847498307936;
+
+    // 로컬 좌표계에서의 주요 점들
+    const x0 = x, y0 = y;
+    const x1 = x + w, y1 = y + h;
+
+    // 각 코너에서 베지어 제어점 이동량
+    const ox = rx * K;
+    const oy = ry * K;
+
+    // 변환 적용 헬퍼
+    const P = (px, py) => applyTransform(px, py, m);
+
+    // 라운드 사각형을 시계방향으로 구성
+    // 시작점: top edge의 좌측 라운드 끝 (x0+rx, y0)
+    const p0 = P(x0 + rx, y0);
+
+    // top edge 직선 끝: (x1-rx, y0)
+    const p1s = P(x1 - rx, y0);
+
+    // TR 코너(Top->Right) : (x1-rx,y0) -> (x1,y0+ry)
+    const c1 = P(x1 - rx + ox, y0);
+    const c2 = P(x1, y0 + ry - oy);
+    const p2e = P(x1, y0 + ry);
+
+    // right edge 직선 끝: (x1, y1-ry)
+    const p3s = P(x1, y1 - ry);
+
+    // BR 코너(Right->Bottom) : (x1,y1-ry) -> (x1-rx,y1)
+    const c3 = P(x1, y1 - ry + oy);
+    const c4 = P(x1 - rx + ox, y1);
+    const p4e = P(x1 - rx, y1);
+
+    // bottom edge 직선 끝: (x0+rx, y1)
+    const p5s = P(x0 + rx, y1);
+
+    // BL 코너(Bottom->Left) : (x0+rx,y1) -> (x0,y1-ry)
+    const c5 = P(x0 + rx - ox, y1);
+    const c6 = P(x0, y1 - ry + oy);
+    const p6e = P(x0, y1 - ry);
+
+    // left edge 직선 끝: (x0, y0+ry)
+    const p7s = P(x0, y0 + ry);
+
+    // TL 코너(Left->Top) : (x0,y0+ry) -> (x0+rx,y0)
+    const c7 = P(x0, y0 + ry - oy);
+    const c8 = P(x0 + rx - ox, y0);
+    const p8e = p0; // 닫힘점
+
+    // path 구성 (직선은 L, 코너는 C)
+    return [
+      `M ${p0.x},${p0.y}`,
+      `L ${p1s.x},${p1s.y}`,
+      `C ${c1.x},${c1.y} ${c2.x},${c2.y} ${p2e.x},${p2e.y}`,
+      `L ${p3s.x},${p3s.y}`,
+      `C ${c3.x},${c3.y} ${c4.x},${c4.y} ${p4e.x},${p4e.y}`,
+      `L ${p5s.x},${p5s.y}`,
+      `C ${c5.x},${c5.y} ${c6.x},${c6.y} ${p6e.x},${p6e.y}`,
+      `L ${p7s.x},${p7s.y}`,
+      `C ${c7.x},${c7.y} ${c8.x},${c8.y} ${p8e.x},${p8e.y}`,
+      "Z",
+    ].join(" ");
   }
 
   function lineToPath(x1, y1, x2, y2, m) {
@@ -1131,12 +1301,6 @@ function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
   return aValid ? solA : solB;
 }
 
-// 스텝 단위 양자화 (0.010986328도)
-function quantizeToStep(x) {
-  // x: degree
-  const steps = Math.round(x / STEP_DEG); // 가장 가까운 step
-  return steps * STEP_DEG;
-}
 
 //p5 draw 함수
 function drawSimulator(p) {
@@ -1157,6 +1321,14 @@ function drawSimulator(p) {
   } else if (mode === 1) {
     // ---------- 자동 모드 ----------
     isPlaying = true;
+    p.frameRate(100);
+  } else if (mode === 2) {
+    // ---------- 빠르게 그리기 -------
+    isPlaying = true;
+    p.frameRate(200);
+  } else if (mode === 3) {
+    // ---------- 한번에 결과보기 -----
+    isPlaying = false;
   }
 
   // 배경
@@ -1171,11 +1343,18 @@ function drawSimulator(p) {
   p.scale(scale);
 
   // 1) 모션 소스 선택 (JSON or SVG)
-  if (isPlaying && motionJson.length > 0) {
-    const now = p.millis();
-    if (now - lastJsonStepTime >= JSON_STEP_MS) {
-      playJsonStep();
-      lastJsonStepTime = now;
+  if (motionJson.length > 0) {
+    if (mode === 3) {
+    }
+    else if (mode === 1) {
+      const now = p.millis();
+      if (now - lastJsonStepTime >= JSON_STEP_MS) {
+        playJsonStep();
+        lastJsonStepTime = now;
+      }
+    }
+    else if (mode === 2) {
+      playJsonSteps(FAST_STEPS_PER_FRAME);
     }
   }
 
@@ -1231,7 +1410,7 @@ function drawSimulator(p) {
   const penX = x3;
   const penY = y3;
 
-  if (trailLayer) {
+  if (trailLayer&& (mode === 1 || mode === 2)) {
     const penScreenX = penX * scale;
     const penScreenY = penY * scale;
 
@@ -1281,16 +1460,16 @@ function drawSimulator(p) {
   p.text(`MAX J2: ${maxJoint2.toFixed(2)}`, 50, 350);
   p.pop();
 }
-// motionJson 다운로드 함수
-function downloadMotionJson(filename = "motionJson.json") {
-  if (!motionJson || motionJson.length === 0) {
-    alert("motionJson 비어있음");
+function downloadPlotTxtDecSpace(filename = "motion_plot.txt") {
+  if (!plot || plot.length === 0) {
+    alert("plot 비어있음 (plotEncode 먼저 수행됐는지 확인)");
     return;
   }
 
-  const text = JSON.stringify(motionJson, null, 2);
-  const blob = new Blob([text], { type: "application/json;charset=utf-8" });
-  const url  = URL.createObjectURL(blob);
+  const text = plot.join(" "); // ✅ 10진수 공백 구분
+
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
 
   const a = document.createElement("a");
   a.href = url;
@@ -1302,7 +1481,7 @@ function downloadMotionJson(filename = "motionJson.json") {
   URL.revokeObjectURL(url);
 }
 // 드롭다운 시 svg 재빌드 함수
-window.rebuildFromSvgText = function(svgText) {
+window.rebuildFromSvgText = function (svgText) {
   jsonBuilt = false;
   motionJson = [];
   jsonIndex = 0;
