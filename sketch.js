@@ -1148,8 +1148,6 @@ function resamplePathByAngle(points, maxDeltaDeg = MAX_DELTA_DEG) {
   if (!points || points.length === 0) return [];
 
   const result = [];
-
-  // 첫 점 IK
   const first = points[0];
   let prevIK = inverseKinematics2DOF(first.x, first.y, null, null);
   if (!prevIK) {
@@ -1159,10 +1157,8 @@ function resamplePathByAngle(points, maxDeltaDeg = MAX_DELTA_DEG) {
   result.push({ x: first.x, y: first.y, pen: first.pen });
 
   function subdivide(p0, ik0, p1, depth = 0) {
-    // 재귀 깊이 제한
     if (depth > 20) {
-      const ik1_fallback =
-        inverseKinematics2DOF(p1.x, p1.y, ik0.joint1, ik0.joint2) || ik0;
+      const ik1_fallback = inverseKinematics2DOF(p1.x, p1.y, ik0.joint1, ik0.joint2) || ik0;
       return [{ point: p1, ik: ik1_fallback }];
     }
 
@@ -1179,11 +1175,10 @@ function resamplePathByAngle(points, maxDeltaDeg = MAX_DELTA_DEG) {
       return [{ point: p1, ik: ik1 }];
     }
 
-    // 각도 변화 너무 크면 중간점 삽입
     const mid = {
       x: (p0.x + p1.x) / 2,
       y: (p0.y + p1.y) / 2,
-      pen: p1.pen,
+      pen: p1.pen,  // ★ 목적지의 펜 상태를 유지
     };
 
     const ikMid = inverseKinematics2DOF(mid.x, mid.y, ik0.joint1, ik0.joint2);
@@ -1205,7 +1200,7 @@ function resamplePathByAngle(points, maxDeltaDeg = MAX_DELTA_DEG) {
       result.push({
         x: sp.point.x,
         y: sp.point.y,
-        pen: curr.pen,
+        pen: curr.pen,  // ★ 현재 포인트의 원래 펜 상태 사용
       });
     }
     const last = segPoints[segPoints.length - 1];
