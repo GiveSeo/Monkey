@@ -13,6 +13,23 @@ function normalizeAngle(angle) {
   while (angle < -180) angle += 360;
   return angle;
 }
+// 순방향 운동학 함수 (각도 → 펜 좌표)
+function fkPenXY_deg(j1Deg, j2Deg) {
+  const theta1 = (j1Deg * Math.PI / 180) * -1;
+
+  const physicalJ2 = j2Deg + JOINT2_OFFSET;
+  const theta2 = (physicalJ2 * Math.PI / 180) * -1;
+
+  const theta1_fk = theta1 + upperRestAngle;
+
+  const x2 = baseX + link1Length * Math.cos(theta1_fk);
+  const y2 = baseY + link1Length * Math.sin(theta1_fk);
+
+  const x3 = x2 + link2Length * Math.cos(theta1_fk + theta2);
+  const y3 = y2 + link2Length * Math.sin(theta1_fk + theta2);
+
+  return { x: x3, y: y3 };
+}
 // 시간 보장 변수
 let lastJsonStepTime = 0;
 const JSON_STEP_MS = 1;
@@ -44,9 +61,6 @@ let FILENAME = "Cat.svg"; // 그릴 SVG 파일 이름
 let drawScale = 0.4; // SVG → 로봇 스케일
 let svgPathPoints = []; // 최종: 로봇 좌표계 (x, y, pen)
 
-// scale x,y offset
-let Xoffset = +140;
-let Yoffset = -40;
 
 // 이미지 기준 기본 각도
 let upperRestAngle = 0; // upperarm 이미지 기울어진 각도
@@ -150,6 +164,7 @@ function playJsonStep() {
 
   jsonIndex++;
 }
+
 function startJsonPlayback(jsonData) {
   if (jsonData) {
     motionJson = jsonData;
@@ -483,7 +498,6 @@ function buildMotionJsonFromSvg() {
     console.error("plotDecode 오류:", err);
   }
 }
-
 // p5 setup 함수
 function setupSimulator(p) {
   canvasWidth = 1200 * scale + 400;
@@ -1032,126 +1046,6 @@ function resamplePathByAngle(points, maxDeltaDeg = MAX_DELTA_DEG) {
   return result;
 }
 
-// svg에서 추출한 좌표 scale 함수
-function fitSvgPointsToWorkspace(points) {
-  if (!points || !points.length) return [];
-
-  const Lsum = link1Length + link2Length;
-
-  // 1) SVG 원본 좌표의 bounding box
-  let minX = Infinity,
-    maxX = -Infinity;
-  let minY = Infinity,
-    maxY = -Infinity;
-
-  for (const p of points) {
-    minX = Math.min(minX, p.x);
-    maxX = Math.max(maxX, p.x);
-    minY = Math.min(minY, p.y);
-    maxY = Math.max(maxY, p.y);
-  }
-
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-
-  let maxR = 0;
-  for (const p of points) {
-    const dx = p.x - cx;
-    const dy = p.y - cy;
-    maxR = Math.max(maxR, Math.hypot(dx, dy));
-  }
-  if (maxR < 1e-6) maxR = 1.0;
-
-  const safetyMargin = 0.85; // 작업반경의 85%만 사용
-  const maxReach = Lsum * safetyMargin;
-  let scaleSvg = (maxReach * drawScale) / maxR;
-
-  const drawCx = baseX;
-  const drawCy = baseY + Lsum * 0.6;
-
-  const maxIterations = 5;
-  let validScale = false;
-
-  for (let iter = 0; iter < maxIterations; iter++) {
-    console.log(
-      `검증 반복 ${iter + 1}/${maxIterations}, scale: ${scaleSvg.toFixed(4)}`
-    );
-
-    let failCount = 0;
-    let outOfRangeCount = 0;
-
-    const testPoints = points.map((p) => {
-      const dx = (p.x - cx) * scaleSvg + Xoffset;
-      const dy = (p.y - cy) * scaleSvg + Yoffset;
-      return {
-        x: drawCx + dx,
-        y: drawCy + dy,
-        pen: p.pen,
-      };
-    });
-
-    const sampleRate = Math.max(1, Math.floor(testPoints.length / 100));
-
-    for (let i = 0; i < testPoints.length; i += sampleRate) {
-      const pt = testPoints[i];
-      const ik = inverseKinematics2DOF(pt.x, pt.y, 0, 0);
-
-      if (!ik) {
-        failCount++;
-        continue;
-      }
-
-      if (
-        ik.joint1 < J1_MIN ||
-        ik.joint1 > J1_MAX ||
-        ik.joint2 < J2_MIN ||
-        ik.joint2 > J2_MAX
-      ) {
-        outOfRangeCount++;
-      }
-    }
-
-    const sampleSize = Math.ceil(testPoints.length / sampleRate);
-    const failRate = failCount / sampleSize;
-    const outRate = outOfRangeCount / sampleSize;
-
-    console.log(
-      `IK 실패: ${failCount}/${sampleSize} (${(failRate * 100).toFixed(1)}%)`
-    );
-    console.log(
-      `범위 초과: ${outOfRangeCount}/${sampleSize} (${(outRate * 100).toFixed(
-        1
-      )}%)`
-    );
-
-    if (failRate < 0.05 && outRate < 0.05) {
-      validScale = true;
-      console.log(`적합한 스케일 발견!`);
-      break;
-    }
-
-    scaleSvg *= 0.9;
-  }
-
-  if (!validScale) {
-    console.warn(`완벽한 스케일을 찾지 못했지만 최선의 스케일로 진행합니다.`);
-  }
-
-  const result = points.map((p) => {
-    const dx = (p.x - cx) * scaleSvg + Xoffset;
-    const dy = (p.y - cy) * scaleSvg + Yoffset;
-
-    return {
-      x: drawCx + dx,
-      y: drawCy + dy,
-      pen: p.pen,
-    };
-  });
-
-  console.log(` 최종 스케일: ${scaleSvg.toFixed(4)}`);
-  return result;
-}
-
 // 2DOF 역기구학 함수
 function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
   const L1 = link1Length;
@@ -1237,7 +1131,7 @@ function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
   return aValid ? solA : solB;
 }
 
-// 스텝 단위 양자화 (0.01도)
+// 스텝 단위 양자화 (0.010986328도)
 function quantizeToStep(x) {
   // x: degree
   const steps = Math.round(x / STEP_DEG); // 가장 가까운 step
@@ -1387,8 +1281,7 @@ function drawSimulator(p) {
   p.text(`MAX J2: ${maxJoint2.toFixed(2)}`, 50, 350);
   p.pop();
 }
-
-
+// motionJson 다운로드 함수
 function downloadMotionJson(filename = "motionJson.json") {
   if (!motionJson || motionJson.length === 0) {
     alert("motionJson 비어있음");
@@ -1408,7 +1301,7 @@ function downloadMotionJson(filename = "motionJson.json") {
 
   URL.revokeObjectURL(url);
 }
-
+// 드롭다운 시 svg 재빌드 함수
 window.rebuildFromSvgText = function(svgText) {
   jsonBuilt = false;
   motionJson = [];
@@ -1429,10 +1322,7 @@ window.rebuildFromSvgText = function(svgText) {
   buildMotionJsonFromSvg();
   startJsonPlayback();
 };
-
-
-
-
+// SVG 좌표계(0~SVG_BOX_SIZE)로 정규화 함수
 function normalizeToBox(points) {
   let minX = Infinity, minY = Infinity;
   let maxX = -Infinity, maxY = -Infinity;
@@ -1463,24 +1353,7 @@ function normalizeToBox(points) {
     pen: p.pen
   }));
 }
-
-function fkPenXY_deg(j1Deg, j2Deg) {
-  const theta1 = (j1Deg * Math.PI / 180) * -1;
-
-  const physicalJ2 = j2Deg + JOINT2_OFFSET;
-  const theta2 = (physicalJ2 * Math.PI / 180) * -1;
-
-  const theta1_fk = theta1 + upperRestAngle;
-
-  const x2 = baseX + link1Length * Math.cos(theta1_fk);
-  const y2 = baseY + link1Length * Math.sin(theta1_fk);
-
-  const x3 = x2 + link2Length * Math.cos(theta1_fk + theta2);
-  const y3 = y2 + link2Length * Math.sin(theta1_fk + theta2);
-
-  return { x: x3, y: y3 };
-}
-
+// SVG 박스 좌표계 → 로봇 작업공간 좌표계 매핑 함수
 function mapBoxToRobotTargets(points, k = 1.0, flipY = false) {
   const home = fkPenXY_deg(0, 0);
 

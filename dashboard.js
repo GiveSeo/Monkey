@@ -228,11 +228,7 @@ function dashboard() {
     downloadMotionJson("motionJson.json"); // ✅ 이 함수는 전역에 있어야 함 (Sketch.js에 두는 걸 추천)
   });
 }
-
-
-// === 키보드 제어 추가 ===
-
-
+// === 키보드 이벤트 처리 ===
 window.addEventListener("keydown", (e) => {
 
   let changed = false;
@@ -284,8 +280,6 @@ window.addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 
-
-
 function control() {
   // 1) 첫 호출에서 엔코더 값으로 초기화
   if (!init) {
@@ -325,6 +319,7 @@ function control() {
   $("encoder.joint_1").d = Math.round(angles[0]);
   $("encoder.joint_2").d = Math.round(angles[1]);
 }
+// === SVG 드래그 앤 드롭 처리 함수 ===
 function setupSvgDragDrop(popup_box_selection) {
   const el = popup_box_selection.node();
   if (!el) return;
