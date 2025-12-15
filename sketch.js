@@ -47,7 +47,7 @@ let jsonBuilt = false;
 let jsonIndex = 0;
 
 // 실제 로봇팔 스케일
-const SVG_BOX_SIZE = 200;
+const SVG_BOX_SIZE = 250;
 // =======================
 // 기존 전역 변수들
 // =======================
@@ -533,9 +533,9 @@ function setupSimulator(p) {
 
     const ptsBox = normalizeToBox(rawPts); // (0,0)~(SVG_BOX_SIZE,SVG_BOX_SIZE)
 
-    const k = SVG_BOX_SIZE / (SVG_BOX_SIZE * scale); 
+    const k = 1.0;
 
-    let fittedPts = mapBoxToRobotTargets(ptsBox, k, false); // 로봇 좌표계로 매핑
+    let fittedPts = mapBoxToRobotTargets(ptsBox); // 로봇 좌표계로 매핑
     // 필요하면 거리/각도 리샘플링 추가
     fittedPts = resamplePathByAngle(fittedPts, MAX_DELTA_DEG);
 
@@ -1312,8 +1312,8 @@ window.rebuildFromSvgText = function(svgText) {
 
   const ptsBox = normalizeToBox(rawPts);
 
-  const k = SVG_BOX_SIZE / (SVG_BOX_SIZE * scale); // 화면 230px 고정
-  let fittedPts = mapBoxToRobotTargets(ptsBox, k, false);
+  const k = 1.0; // 화면 230px 고정
+  let fittedPts = mapBoxToRobotTargets(ptsBox);
 
   fittedPts = resamplePathByAngle(fittedPts, MAX_DELTA_DEG);
 
