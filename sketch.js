@@ -30,15 +30,9 @@ function fkPenXY_deg(j1Deg, j2Deg) {
 
   return { x: x3, y: y3 };
 }
-// 시간 보장 변수
-let lastJsonStepTime = 0;
-const JSON_STEP_MS = 10;
 
 // 그리기 모드
 let drawMode = 0;
-
-
-const FAST_STEPS_PER_FRAME = 5000; // 빠른 재생시 프레임당 최대 스텝 수
 let bakedOnce = false; // 한번에 그릴 것인지 여부
 // =======================
 // 로봇 JSON 관련 전역
@@ -48,7 +42,6 @@ let bakedOnce = false; // 한번에 그릴 것인지 여부
 //   d1: joint1 step 증분
 //   d2: joint2 step 증분
 //   pen: 0(업), 1(다운)
-let jsonBuilt = false;
 let jsonIndex = 0;
 
 // 실제 로봇팔 스케일
@@ -58,10 +51,6 @@ const SVG_BOX_SIZE = 250;
 // =======================
 const MAX_DELTA_DEG = STEP_DEG * MAX_STEPS_PT; // 0.07도
 const JOINT2_OFFSET = 143; // joint2가 0도일 때, 팔이 ㄷ자 모양이 되도록 오프셋 각도
-
-let STEP = 1; // SVG 길이 기준 샘플링 단위(px)
-let drawScale = 0.4; // SVG → 로봇 스케일
-let svgPathPoints = []; // 최종: 로봇 좌표계 (x, y, pen)
 
 
 // 이미지 기준 기본 각도
@@ -92,13 +81,10 @@ const scale = 0.7; // 전체 캔버스 스케일
 const moreHeight = 100;
 const imageScale = 0.5; // PNG 이미지 자체 스케일
 
-//spine 모델에서 최솟값, 최댓값 추출
-const J1_MIN = plutto.minJoint1;
-const J1_MAX = plutto.maxJoint1;
-
-// 진짜 최소/최대 정렬
-const J2_MIN = plutto.minJoint2;
-const J2_MAX = plutto.maxJoint2;
+function J1_MIN() { return plutto.minJoint1; }
+function J1_MAX() { return plutto.maxJoint1; }
+function J2_MIN() { return plutto.minJoint2; }
+function J2_MAX() { return plutto.maxJoint2; }
 
 // 이미지 기준 팔 관절 픽셀 좌표 (길이 구하거나, 각도 측정시 필요)
 const TOP_JOINT_X = 220;
@@ -153,8 +139,8 @@ function playJsonStep() {
   currentAngleJoint2 += normalizeAngle(deltaDeg2);
 
   // 관절 제한 클램프 (혹시라도 JSON이 범위 넘어가면 잘라줌)
-  currentAngleJoint1 = Math.max(J1_MIN, Math.min(J1_MAX, currentAngleJoint1));
-  currentAngleJoint2 = Math.max(J2_MIN, Math.min(J2_MAX, currentAngleJoint2));
+currentAngleJoint1 = Math.max(J1_MIN(), Math.min(J1_MAX(), currentAngleJoint1));
+currentAngleJoint2 = Math.max(J2_MIN(), Math.min(J2_MAX(), currentAngleJoint2));
 
   // 펜 상태 반영
   $('pen').d = cmd.pen;
@@ -166,11 +152,52 @@ function playJsonStep() {
   jsonIndex++;
 }
 
-function playJsonSteps(n) {
-  for (let i = 0; i < n; i++) {
-    if (jsonIndex >= plutto.motionJson.length) return false;
-    playJsonStep();
+function playJsonStepAndBake() {
+  if (jsonIndex >= plutto.motionJson.length) return false;
+
+  // 1) 한 스텝 진행 (기존 playJsonStep 내용)
+  const cmd = plutto.motionJson[jsonIndex];
+
+  const deltaDeg1 = cmd.d1 * STEP_DEG;
+  const deltaDeg2 = cmd.d2 * STEP_DEG;
+
+  currentAngleJoint1 += normalizeAngle(deltaDeg1);
+  currentAngleJoint2 += normalizeAngle(deltaDeg2);
+
+  currentAngleJoint1 = Math.max(J1_MIN(), Math.min(J1_MAX(), currentAngleJoint1));
+  currentAngleJoint2 = Math.max(J2_MIN(), Math.min(J2_MAX(), currentAngleJoint2));
+
+  $('pen').d = cmd.pen;
+  $("encoder.joint_1").d = currentAngleJoint1;
+  $("encoder.joint_2").d = currentAngleJoint2;
+
+  jsonIndex++;
+
+  // 2) ✅ “이 스텝의 결과”를 trailLayer에 굽기
+  if (!trailLayer) return true;
+
+  const pos = plutto.fkPenXY_deg(currentAngleJoint1, currentAngleJoint2); // 전역 fk 사용
+  const penScreenX = pos.x * scale;
+  const penScreenY = pos.y * scale;
+
+  if (
+    prevPenScreenX !== null &&
+    prevPenScreenY !== null &&
+    prevPenState === 1 &&
+    $('pen').d === 1
+  ) {
+    trailLayer.push();
+    trailLayer.stroke(255, 0, 0);
+    trailLayer.strokeWeight(2);
+    trailLayer.noFill();
+    trailLayer.line(prevPenScreenX, prevPenScreenY, penScreenX, penScreenY);
+    trailLayer.pop();
   }
+
+  prevPenScreenX = penScreenX;
+  prevPenScreenY = penScreenY;
+  prevPenState = $('pen').d;
+
   return true;
 }
 
@@ -217,7 +244,7 @@ function bakeAllToTrailLayer() {
   while (jsonIndex < plutto.motionJson.length) {
     playJsonStep();
 
-    const pos = fkPenXY_deg(currentAngleJoint1, currentAngleJoint2);
+    const pos = plutto.fkPenXY_deg(currentAngleJoint1, currentAngleJoint2);
     const x = pos.x * scale;
     const y = pos.y * scale;
 
@@ -265,6 +292,15 @@ function setupSimulator(p) {
   // 베이스 위치 계산
   initBasePosition();
 
+  plutto.setKinematics({
+    baseX,
+    baseY,
+    link1Length,
+    link2Length,
+    upperRestAngle,
+    foreRestAngle,
+    JOINT2_OFFSET,
+  });
   // trailLayer 생성 (캔버스와 같은 크기, 투명 배경)
   trailLayer = p.createGraphics(canvasWidth, canvasHeight);
   trailLayer.clear();
@@ -317,90 +353,6 @@ function initBasePosition() {
   }
 }
 
-// 2DOF 역기구학 함수
-function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
-  const L1 = link1Length;
-  const L2 = link2Length;
-
-  const dx = targetX - baseX;
-  const dy = targetY - baseY;
-  let d = Math.hypot(dx, dy);
-  if (d < 1e-6) d = 1e-6;
-
-  // 작업 영역 체크
-  const maxReach = L1 + L2 - 1e-3;
-  const minReach = Math.abs(L1 - L2) + 1e-3;
-
-  // 도달 불가능하면 null 반환
-  if (d > maxReach || d < minReach) {
-    return null;
-  }
-
-  let cos2 = (d * d - L1 * L1 - L2 * L2) / (2 * L1 * L2);
-  cos2 = Math.max(-1, Math.min(1, cos2));
-
-  const theta2Abs = Math.acos(cos2);
-  const theta2List = [theta2Abs, -theta2Abs];
-
-  function solve(theta2_fk) {
-    const k1 = L1 + L2 * Math.cos(theta2_fk);
-    const k2 = L2 * Math.sin(theta2_fk);
-    const theta1_fk = Math.atan2(dy, dx) - Math.atan2(k2, k1);
-
-    const theta1 = theta1_fk - upperRestAngle;
-    const theta2 = theta2_fk;
-
-    const joint1DegPhysical = (-theta1 * 180) / Math.PI;
-    const joint2DegPhysical = (-theta2 * 180) / Math.PI;
-
-    // 기존 내부 기준
-    const joint1Old = joint1DegPhysical;
-    const joint2Old = -(joint2DegPhysical - JOINT2_OFFSET);
-
-    // 새 논리 기준: 시계 -, 반시계 +
-    const joint1Deg = normalizeAngle(joint1Old);
-    const joint2Deg = normalizeAngle(-joint2Old);
-
-    return { joint1: joint1Deg, joint2: joint2Deg };
-  }
-
-  const solA = solve(theta2List[0]);
-  const solB = solve(theta2List[1]);
-
-  // 관절 제한 체크
-  const aValid =
-    solA.joint1 >= J1_MIN &&
-    solA.joint1 <= J1_MAX &&
-    solA.joint2 >= J2_MIN &&
-    solA.joint2 <= J2_MAX;
-  const bValid =
-    solB.joint1 >= J1_MIN &&
-    solB.joint1 <= J1_MAX &&
-    solB.joint2 >= J2_MIN &&
-    solB.joint2 <= J2_MAX;
-
-  if (!aValid && !bValid) {
-    return null; // 둘 다 범위 밖
-  }
-
-  // 이전 각도가 없으면 유효한 해 반환
-  if (typeof prevJ1Deg !== "number" || typeof prevJ2Deg !== "number") {
-    return aValid ? solA : solB;
-  }
-
-  // 연속성 기준 선택 (유효한 해만 고려)
-  function score(sol) {
-    const d1 = normalizeAngle(sol.joint1 - prevJ1Deg);
-    const d2 = normalizeAngle(sol.joint2 - prevJ2Deg);
-    return d1 * d1 + d2 * d2;
-  }
-
-  if (aValid && bValid) {
-    return score(solB) < score(solA) ? solB : solA;
-  }
-
-  return aValid ? solA : solB;
-}
 
 //p5 draw 함수
 function drawSimulator(p) {
@@ -420,11 +372,9 @@ function drawSimulator(p) {
   } else if (drawMode === 1) {
     // ---------- 자동 모드 ----------
     isPlaying = true;
-    p.frameRate(100);
   } else if (drawMode === 2) {
     // ---------- 빠르게 그리기 -------
     isPlaying = true;
-    p.frameRate(200);
   } else if (drawMode === 3) {
     // ---------- 한번에 결과보기 -----
     isPlaying = false;
@@ -446,14 +396,13 @@ function drawSimulator(p) {
     if (drawMode === 3) {
     }
     else if (drawMode === 1) {
-      const now = p.millis();
-      if (now - lastJsonStepTime >= JSON_STEP_MS) {
         playJsonStep();
-        lastJsonStepTime = now;
-      }
     }
     else if (drawMode === 2) {
-      playJsonSteps(FAST_STEPS_PER_FRAME);
+        const start = performance.now();
+  while (performance.now() - start < 0.1) {
+    if (!playJsonStepAndBake()) break;
+  }
     }
   }
 

@@ -474,10 +474,8 @@ function setupSvgDragDrop(popup_box_selection) {
         plutto.motionJson = motion;
 
         // 3) 재생 상태 초기화(있으면)
-        if (typeof startJsonPlayback === "function") {
-          jsonBuilt = true;
-          startJsonPlayback();
-        }
+        plutto.jsonBuilt = true;
+        if (typeof startJsonPlayback === "function") startJsonPlayback();
 
         const kb = (lastSvgSize / 1024).toFixed(1);
         lastSvgStatus = `TXT Plot Loaded ✅ (${kb} KB, ${bytes.length} bytes, ${motion.length} cmds)`;
@@ -518,22 +516,17 @@ function downloadPlotTxtDecSpace(filename = "motion_plot.txt") {
 }
 // 드롭다운 시 svg 재빌드 함수
 window.rebuildFromSvgText = function (svgText) {
-  jsonBuilt = false;
-  plutto.motionJson = [];
-  jsonIndex = 0;
+  // UI쪽만 초기화
   if (typeof trailLayer !== "undefined") trailLayer.clear();
 
-  const rawPts = extractPathPointsFromSvg(svgText, STEP);
+  // 엔진 처리: plutto에게 위임
+  if (plutto && typeof plutto.buildFromSvgText === "function") {
+    plutto.buildFromSvgText(svgText);
+  } else {
+    console.error("plutto.buildFromSvgText가 없습니다.");
+    return;
+  }
 
-  const ptsBox = normalizeToBox(rawPts);
-
-  const k = 1.0; // 화면 230px 고정
-  let fittedPts = mapBoxToRobotTargets(ptsBox);
-
-  fittedPts = resamplePathByAngle(fittedPts, MAX_DELTA_DEG);
-
-  svgPathPoints = fittedPts;
-
-  buildMotionJsonFromSvg();
-  startJsonPlayback();
+  // 렌더링(재생)은 sketch에게
+  if (typeof startJsonPlayback === "function") startJsonPlayback();
 };
