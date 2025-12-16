@@ -172,7 +172,7 @@ function dashboard() {
     penIsDown = !penIsDown;
 
     //  핵심: p5에서 쓰는 currentPen을 여기서 직접 바꿔준다
-    currentPen = penIsDown ? 1 : 0;
+    $('pen').d = penIsDown ? 1 : 0;
 
     // 버튼 텍스트 변경
     select("#pen_toggle_btn").text(penIsDown ? "Pen Up" : "Pen Down");
@@ -206,7 +206,7 @@ function dashboard() {
   select("#draw_manual_btn").on("click", () => {
     // 재생 시작
     drawMode = 0;
-    currentPen = 0;
+    $('pen').d = 0;
 
     console.log("manual drawing mode activated");
   });
@@ -217,7 +217,7 @@ function dashboard() {
   select("#svg_draw_double_btn").on("click", () => {
     // 재생 시작
     drawMode = 2;
-    currentPen = 0;
+    $('pen').d = 0;
     startJsonPlayback();
     $("encoder.joint_1").d = currentAngleJoint1;
     $("encoder.joint_2").d = currentAngleJoint2;
@@ -230,7 +230,7 @@ function dashboard() {
   select("#svg_draw_all_btn").on("click", () => {
     // 재생 시작
     drawMode = 3;
-    currentPen = 0;
+    $('pen').d = 0;
     startJsonPlayback();
     bakeAllToTrailLayer(); 
     $("encoder.joint_1").d = currentAngleJoint1;

@@ -88,7 +88,6 @@ let topPath, upperPath, forePath;
 
 let currentAngleJoint1 = 0; // 로봇 팔 joint1 각도
 let currentAngleJoint2 = 0; // 로봇 팔 joint2 각도
-let currentPen = 0; // 0: 펜 업, 1: 펜 다운
 
 // 관절 범위 (path로 인해 한번 이상 이동해야 정상적인 관절 범위 확인 가능)
 let minJoint1 = 1e9;
@@ -165,7 +164,7 @@ function playJsonStep() {
   currentAngleJoint2 = Math.max(J2_MIN, Math.min(J2_MAX, currentAngleJoint2));
 
   // 펜 상태 반영
-  currentPen = cmd.pen;
+  $('pen').d = cmd.pen;
 
   // 엔코더 값도 같이 업데이트
   $("encoder.joint_1").d = currentAngleJoint1;
@@ -193,7 +192,7 @@ function startJsonPlayback(jsonData) {
   // 초기화: 홈에서 시작한다고 가정 (필요하면 홈 각도로 바꾸기)
   currentAngleJoint1 = 0;
   currentAngleJoint2 = 0;
-  currentPen = 0;
+  $('pen').d = 0;
 
   prevPenScreenX = null;
   prevPenScreenY = null;
@@ -211,7 +210,7 @@ function bakeAllToTrailLayer() {
   jsonIndex = 0;
   currentAngleJoint1 = 0;
   currentAngleJoint2 = 0;
-  currentPen = 0;
+  $('pen').d = 0;
 
   prevPenScreenX = null;
   prevPenScreenY = null;
@@ -228,7 +227,7 @@ function bakeAllToTrailLayer() {
     const x = pos.x * scale;
     const y = pos.y * scale;
 
-    if (prevX !== null && prevY !== null && prevPen === 1 && currentPen === 1) {
+    if (prevX !== null && prevY !== null && prevPen === 1 && $('pen').d === 1) {
       trailLayer.push();
       trailLayer.stroke(255, 0, 0);
       trailLayer.strokeWeight(2);
@@ -238,12 +237,12 @@ function bakeAllToTrailLayer() {
 
     prevX = x;
     prevY = y;
-    prevPen = currentPen;
+    prevPen = $('pen').d;
   }
 
   isPlaying = false;
   drawMode = 0; 
-  currentPen = 0;
+  $('pen').d = 0;
   prevPenState = 0;
   prevPenScreenX = null;
   prevPenScreenY = null;  // ✅ 끝나면 수동 모드로
@@ -289,11 +288,11 @@ function buildMotionJsonFromSvg() {
       const d1 = Math.max(-MAX_STEPS_PT, Math.min(MAX_STEPS_PT, rem1));
       const d2 = Math.max(-MAX_STEPS_PT, Math.min(MAX_STEPS_PT, rem2));
 
-      const currentPen = penState;
+      $('pen').d = penState;
 
-      if (d1 !== 0 || d2 !== 0 || currentPen !== prevPen) {
-        motionJson.push({ d1, d2, pen: currentPen });
-        prevPen = currentPen;
+      if (d1 !== 0 || d2 !== 0 || $('pen').d !== prevPen) {
+        motionJson.push({ d1, d2, pen: $('pen').d });
+        prevPen = $('pen').d;
       }
 
       curStepJ1 += d1;
@@ -439,20 +438,20 @@ function buildMotionJsonFromSvg() {
    */
   function plotDecode(byteArray) {
     const out = [];
-    let currentPen = 0; // 기본 펜 상태
+    $('pen').d = 0; // 기본 펜 상태
 
     for (let i = 0; i < byteArray.length; i++) {
       const b = byteArray[i];
 
       if (b === 0x80) {
         // pen down
-        currentPen = 1;
+        $('pen').d = 1;
       } else if (b === 0x08) {
         // pen up
-        currentPen = 0;
+        $('pen').d = 0;
       } else {
         const { d1, d2 } = decodeDeltaByte(b);
-        out.push({ d1, d2, pen: currentPen });
+        out.push({ d1, d2, pen: $('pen').d });
       }
     }
 
@@ -1410,7 +1409,7 @@ function drawSimulator(p) {
   const penX = x3;
   const penY = y3;
 
-  if (trailLayer&& (drawMode === 1 || drawMode === 2)) {
+  if (trailLayer) {
     const penScreenX = penX * scale;
     const penScreenY = penY * scale;
 
@@ -1418,7 +1417,7 @@ function drawSimulator(p) {
       prevPenScreenX !== null &&
       prevPenScreenY !== null &&
       prevPenState === 1 &&
-      currentPen === 1
+      $('pen').d === 1
     ) {
       trailLayer.push();
       trailLayer.stroke(255, 0, 0);
@@ -1430,7 +1429,7 @@ function drawSimulator(p) {
 
     prevPenScreenX = penScreenX;
     prevPenScreenY = penScreenY;
-    prevPenState = currentPen;
+    prevPenState = $('pen').d;
   }
 
   // 7) 관절 범위 기록
@@ -1453,7 +1452,7 @@ function drawSimulator(p) {
   p.text(`Pen Y: ${y3.toFixed(1)} px`, 50, 150); // ★ 추가
 
   p.text(isPlaying ? "Playing" : "Paused", 50, 170);
-  p.text(`Pen: ${currentPen}`, 50, 190);
+  p.text(`Pen: ${$('pen').d}`, 50, 190);
   p.text(`MIN J1: ${minJoint1.toFixed(2)}`, 50, 290);
   p.text(`MAX J1: ${maxJoint1.toFixed(2)}`, 50, 310);
   p.text(`MIN J2: ${minJoint2.toFixed(2)}`, 50, 330);
