@@ -495,4 +495,45 @@ function setupSvgDragDrop(popup_box_selection) {
     }
   });
 }
+// === 플롯 TXT 다운로드 함수 (10진수 공백 구분) ===
+function downloadPlotTxtDecSpace(filename = "motion_plot.txt") {
+  if (!plutto.plot || plutto.plot.length === 0) {
+    alert("plot 비어있음 (plotEncode 먼저 수행됐는지 확인)");
+    return;
+  }
 
+  const text = plutto.plot.join(" "); // ✅ 10진수 공백 구분
+
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  URL.revokeObjectURL(url);
+}
+// 드롭다운 시 svg 재빌드 함수
+window.rebuildFromSvgText = function (svgText) {
+  jsonBuilt = false;
+  plutto.motionJson = [];
+  jsonIndex = 0;
+  if (typeof trailLayer !== "undefined") trailLayer.clear();
+
+  const rawPts = extractPathPointsFromSvg(svgText, STEP);
+
+  const ptsBox = normalizeToBox(rawPts);
+
+  const k = 1.0; // 화면 230px 고정
+  let fittedPts = mapBoxToRobotTargets(ptsBox);
+
+  fittedPts = resamplePathByAngle(fittedPts, MAX_DELTA_DEG);
+
+  svgPathPoints = fittedPts;
+
+  buildMotionJsonFromSvg();
+  startJsonPlayback();
+};
