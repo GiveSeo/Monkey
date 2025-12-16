@@ -3,15 +3,14 @@ class Plutto{
     #maxEncoderJoint1 = 180;
     #minEncoderJoint2 = -100;
     #maxEncoderJoint2 = 30;
-    #angleSpeedOffset = 10;
-    #speedJointOffset = 10;
+    #motionJson =[];
+    #plot = [];
     // constructor 
     constructor(){
         this.repeat = null; // 반복 함수 저장
         this.encoderJoint1 = $('encoder.joint_1').d;
-        this.encoderJoint2 = $('encoder.joint_2').d;    
-        this.targetAngleJoint1 = null;
-        this.targetAngleJoint2 = null;
+        this.encoderJoint2 = $('encoder.joint_2').d;
+        $('pen').d = 0; // 펜이 종이에 붙어있지 않은 상태
     }
     get minJoint1(){
         return this.#minEncoderJoint1;
@@ -53,7 +52,6 @@ async function setup(spine) {
     return wait(0x7fffffff);
   };
 
-  $('mode').d = 0; // 각도 기반 모드
   await wait(3000);
 }
 
@@ -63,9 +61,6 @@ function serialize() {
 
 
 function deserialize() {
-  $('encoder.joint_1').d = Number(plutto.encoderJoint1.toFixed(3));
-  $('encoder.joint_2').d = Number(plutto.encoderJoint2.toFixed(3));
-  $('encoder.encoders').d = [$('encoder.joint_1').d, $('encoder.joint_2').d];
 }
 
 // put control code here, to run repeatedly

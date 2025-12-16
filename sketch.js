@@ -34,6 +34,10 @@ function fkPenXY_deg(j1Deg, j2Deg) {
 let lastJsonStepTime = 0;
 const JSON_STEP_MS = 10;
 
+// 그리기 모드
+let drawMode = 0;
+
+
 const FAST_STEPS_PER_FRAME = 5000; // 빠른 재생시 프레임당 최대 스텝 수
 let bakedOnce = false; // 한번에 그릴 것인지 여부
 // =======================
@@ -236,7 +240,7 @@ function bakeAllToTrailLayer() {
   }
 
   isPlaying = false;
-  $("mode").d = 0; 
+  drawMode = 0; 
   currentPen = 0;
   prevPenState = 0;
   prevPenScreenX = null;
@@ -1301,9 +1305,8 @@ function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
 function drawSimulator(p) {
   debugFrame++;
 
-  const mode = $("mode").d;
 
-  if (mode === 0) {
+  if (drawMode === 0) {
     // ---------- 수동 모드 ----------
     // 자동 재생 끄기
     isPlaying = false;
@@ -1313,15 +1316,15 @@ function drawSimulator(p) {
 
     currentAngleJoint1 = normalizeAngle(enc1);
     currentAngleJoint2 = normalizeAngle(enc2);
-  } else if (mode === 1) {
+  } else if (drawMode === 1) {
     // ---------- 자동 모드 ----------
     isPlaying = true;
     p.frameRate(100);
-  } else if (mode === 2) {
+  } else if (drawMode === 2) {
     // ---------- 빠르게 그리기 -------
     isPlaying = true;
     p.frameRate(200);
-  } else if (mode === 3) {
+  } else if (drawMode === 3) {
     // ---------- 한번에 결과보기 -----
     isPlaying = false;
   }
@@ -1339,16 +1342,16 @@ function drawSimulator(p) {
 
   // 1) 모션 소스 선택 (JSON or SVG)
   if (motionJson.length > 0) {
-    if (mode === 3) {
+    if (drawMode === 3) {
     }
-    else if (mode === 1) {
+    else if (drawMode === 1) {
       const now = p.millis();
       if (now - lastJsonStepTime >= JSON_STEP_MS) {
         playJsonStep();
         lastJsonStepTime = now;
       }
     }
-    else if (mode === 2) {
+    else if (drawMode === 2) {
       playJsonSteps(FAST_STEPS_PER_FRAME);
     }
   }
@@ -1405,7 +1408,7 @@ function drawSimulator(p) {
   const penX = x3;
   const penY = y3;
 
-  if (trailLayer&& (mode === 1 || mode === 2)) {
+  if (trailLayer&& (drawMode === 1 || drawMode === 2)) {
     const penScreenX = penX * scale;
     const penScreenY = penY * scale;
 

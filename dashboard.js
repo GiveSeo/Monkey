@@ -193,7 +193,7 @@ function dashboard() {
 
   select("#svg_draw_btn").on("click", () => {
     // 재생 시작
-    $("mode").d = 1;
+    drawMode = 1; // drawMode는 sketch에 정의되어 있는 변수입니다.
     startJsonPlayback();
     $("encoder.joint_1").d = currentAngleJoint1;
     $("encoder.joint_2").d = currentAngleJoint2;
@@ -205,7 +205,7 @@ function dashboard() {
 
   select("#draw_manual_btn").on("click", () => {
     // 재생 시작
-    $("mode").d = 0;
+    drawMode = 0;
     currentPen = 0;
 
     console.log("manual drawing mode activated");
@@ -216,7 +216,7 @@ function dashboard() {
 
   select("#svg_draw_double_btn").on("click", () => {
     // 재생 시작
-    $("mode").d = 2;
+    drawMode = 2;
     currentPen = 0;
     startJsonPlayback();
     $("encoder.joint_1").d = currentAngleJoint1;
@@ -229,7 +229,7 @@ function dashboard() {
 
   select("#svg_draw_all_btn").on("click", () => {
     // 재생 시작
-    $("mode").d = 3;
+    drawMode = 3;
     currentPen = 0;
     startJsonPlayback();
     bakeAllToTrailLayer(); 
