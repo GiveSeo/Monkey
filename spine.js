@@ -11,8 +11,8 @@ class Plutto{
     // constructor 
     constructor(){
         this.repeat = null; // 반복 함수 저장
-        $('encoder.joint_1').d = 0;
-        $('encoder.joint_2').d = 0;
+        $("encoder.joint_1").d = 0;
+        $("encoder.joint_2").d = 0;
         
         $('pen').d = 0; // 펜이 종이에 붙어있지 않은 상태
     }

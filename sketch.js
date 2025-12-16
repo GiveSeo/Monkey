@@ -60,7 +60,6 @@ const MAX_DELTA_DEG = STEP_DEG * MAX_STEPS_PT; // 0.07도
 const JOINT2_OFFSET = 143; // joint2가 0도일 때, 팔이 ㄷ자 모양이 되도록 오프셋 각도
 
 let STEP = 1; // SVG 길이 기준 샘플링 단위(px)
-let FILENAME = "Cat.svg"; // 그릴 SVG 파일 이름
 let drawScale = 0.4; // SVG → 로봇 스케일
 let svgPathPoints = []; // 최종: 로봇 좌표계 (x, y, pen)
 
@@ -174,7 +173,7 @@ function playJsonSteps(n) {
   }
   return true;
 }
-// 한번에 그리기 함수
+
 function startJsonPlayback(jsonData) {
   if (jsonData) {
     plutto.motionJson = jsonData;
@@ -196,6 +195,7 @@ function startJsonPlayback(jsonData) {
     trailLayer.clear();
   }
 }
+// 한번에 그리기 함수
 function bakeAllToTrailLayer() {
   if (bakedOnce) return;
   bakedOnce = true;
@@ -241,6 +241,7 @@ function bakeAllToTrailLayer() {
   prevPenScreenX = null;
   prevPenScreenY = null;  // ✅ 끝나면 수동 모드로
 }
+
 function buildMotionJsonFromSvg() {
   if (jsonBuilt) return;
   if (!svgPathPoints || svgPathPoints.length === 0) return;
@@ -514,10 +515,6 @@ function plotDecode(byteArray) {
   return out;
 }
 
-// (선택) 드롭 코드에서 쓰기 쉽게 전역 노출
-window.plotEncode = plotEncode;
-window.plotDecode = plotDecode;
-
 // p5 setup 함수
 function setupSimulator(p) {
   canvasWidth = 1200 * scale + 400;
@@ -545,28 +542,8 @@ function setupSimulator(p) {
   trailLayer = p.createGraphics(canvasWidth, canvasHeight);
   trailLayer.clear();
 
-  // SVG 로드 & 점 추출 → 작업공간으로 맵핑
-  const svgPath = spine.images.get(FILENAME); // Spine에 등록된 SVG 경로
-  p.loadStrings(svgPath, (lines) => {
-    const svgText = lines.join("\n");
-    const rawPts = extractPathPointsFromSvg(svgText, STEP); // SVG 원 좌표
-
-    const ptsBox = normalizeToBox(rawPts); // (0,0)~(SVG_BOX_SIZE,SVG_BOX_SIZE)
-
-    const k = 1.0;
-
-    let fittedPts = mapBoxToRobotTargets(ptsBox); // 로봇 좌표계로 매핑
-    // 필요하면 거리/각도 리샘플링 추가
-    fittedPts = resamplePathByAngle(fittedPts, MAX_DELTA_DEG);
-
-    svgPathPoints = fittedPts;
-
-    // 1) SVG → 로봇용 JSON 생성
-    buildMotionJsonFromSvg();
-
-    // 2) 시뮬레이터를 JSON 기준으로 돌려보고 싶다면:
-    startJsonPlayback();
-  });
+  // ✅ 여기서 SVG loadStrings(Spine 경로로 읽기) 제거
+  //    (드롭 이벤트에서 rebuildFromSvgText(svgText) 호출할 것)
 
   // 팝업, 캔버스 크기 조정
   w2custompopup.resize(canvasWidth + 16, canvasHeight + 96);
@@ -1267,7 +1244,6 @@ function inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg) {
 
   return aValid ? solA : solB;
 }
-
 
 //p5 draw 함수
 function drawSimulator(p) {
