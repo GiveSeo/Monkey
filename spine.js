@@ -1,3 +1,6 @@
+const STEP_DEG = 0.010986328;// 1스탭당 몇도인지(실제 스탭 각도 기준)
+const MAX_STEPS_PT = 7;
+
 class Plutto{
     #minEncoderJoint1 = -30;
     #maxEncoderJoint1 = 180;
@@ -37,6 +40,18 @@ class Plutto{
     set maxJoint2(value){
         this.#maxEncoderJoint2 = value;
     }
+    get motionJson(){
+        return this.#motionJson;
+    }
+    set motionJson(value){
+        this.#motionJson = Array.isArray(value) ? value : [];
+    }
+    get plot(){
+        return this.#plot;
+    }
+    set plot(value){
+        this.#plot = Array.isArray(value) ? value : [];
+    }
 }
 
 // --------인스턴스-------------
@@ -61,7 +76,6 @@ function degToStep(deg){
 }
 
 function stepToDeg(step){
-    
     return step * STEP_DEG;
 }
 

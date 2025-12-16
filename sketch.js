@@ -7,8 +7,6 @@ function sketch() {
   }, "p5-canvas");
 }
 
-
-
 function normalizeAngle(angle) {
   // angle을 -180 ~ 180 범위로 정규화
   while (angle > 180) angle -= 360;
@@ -50,8 +48,6 @@ let bakedOnce = false; // 한번에 그릴 것인지 여부
 //   d1: joint1 step 증분
 //   d2: joint2 step 증분
 //   pen: 0(업), 1(다운)
-let motionJson = [];
-let plot;
 let jsonBuilt = false;
 let jsonIndex = 0;
 
@@ -60,8 +56,6 @@ const SVG_BOX_SIZE = 250;
 // =======================
 // 기존 전역 변수들
 // =======================
-const STEP_DEG = 0.010986328; // 1스탭당 몇도인지(실제 스탭 각도 기준)
-const MAX_STEPS_PT = 7; // point -> point 최대 7 step
 const MAX_DELTA_DEG = STEP_DEG * MAX_STEPS_PT; // 0.07도
 const JOINT2_OFFSET = 143; // joint2가 0도일 때, 팔이 ㄷ자 모양이 되도록 오프셋 각도
 
@@ -145,11 +139,11 @@ function openRobotPopup() {
 }
 
 function playJsonStep() {
-  if (jsonIndex >= motionJson.length) {
+  if (jsonIndex >= plutto.motionJson.length) {
     return;
   }
 
-  const cmd = motionJson[jsonIndex];
+  const cmd = plutto.motionJson[jsonIndex];
 
   // d1, d2는 step 증분이니까 각도로 변환
   const deltaDeg1 = cmd.d1 * STEP_DEG;
@@ -175,7 +169,7 @@ function playJsonStep() {
 
 function playJsonSteps(n) {
   for (let i = 0; i < n; i++) {
-    if (jsonIndex >= motionJson.length) return false;
+    if (jsonIndex >= plutto.motionJson.length) return false;
     playJsonStep();
   }
   return true;
@@ -183,7 +177,7 @@ function playJsonSteps(n) {
 // 한번에 그리기 함수
 function startJsonPlayback(jsonData) {
   if (jsonData) {
-    motionJson = jsonData;
+    plutto.motionJson = jsonData;
   }
   jsonIndex = 0;
   isPlaying = false;
@@ -220,7 +214,7 @@ function bakeAllToTrailLayer() {
 
   let prevX = null, prevY = null, prevPen = 0;
 
-  while (jsonIndex < motionJson.length) {
+  while (jsonIndex < plutto.motionJson.length) {
     playJsonStep();
 
     const pos = fkPenXY_deg(currentAngleJoint1, currentAngleJoint2);
@@ -252,7 +246,7 @@ function buildMotionJsonFromSvg() {
   if (!svgPathPoints || svgPathPoints.length === 0) return;
 
   console.log("motionJson 생성");
-  motionJson = [];
+  plutto.motionJson = [];
 
   let curStepJ1 = 0;
   let curStepJ2 = 0;
@@ -275,7 +269,7 @@ function buildMotionJsonFromSvg() {
 
     if (maxDiff === 0) {
       if (penState !== prevPen) {
-        motionJson.push({ d1: 0, d2: 0, pen: penState });
+        plutto.motionJson.push({ d1: 0, d2: 0, pen: penState });
         prevPen = penState;
       }
       return;
@@ -291,7 +285,7 @@ function buildMotionJsonFromSvg() {
       $('pen').d = penState;
 
       if (d1 !== 0 || d2 !== 0 || $('pen').d !== prevPen) {
-        motionJson.push({ d1, d2, pen: $('pen').d });
+        plutto.motionJson.push({ d1, d2, pen: $('pen').d });
         prevPen = $('pen').d;
       }
 
@@ -323,141 +317,6 @@ function buildMotionJsonFromSvg() {
       console.error("첫 포인트가 작업 영역 밖입니다!");
     }
   }
-
-  /*
- 숫자(-7 ~ 7)를 4비트 값으로 바꾸는 함수
- -7부터 7까지 숫자를 각각 4자리 2진수로 매핑
- */
-  function encodeNibble(d) {
-    const map = {
-      "-7": 0b1001,
-      "-6": 0b1010,
-      "-5": 0b1011,
-      "-4": 0b1100,
-      "-3": 0b1101,
-      "-2": 0b1110,
-      "-1": 0b1111,
-      0: 0b0000,
-      1: 0b0001,
-      2: 0b0010,
-      3: 0b0011,
-      4: 0b0100,
-      5: 0b0101,
-      6: 0b0110,
-      7: 0b0111,
-    };
-    return map[d];
-  }
-
-  /**
-   * d1, d2는 로봇 관절의 동작 변화량 단위
-   * 두 숫자를 한 바이트로 저장
-   * - hi 4비트: d1
-   * - lo 4비트: d2
-   */
-  function encodeDeltaByte(d1, d2) {
-    const hi = encodeNibble(d1); // d1를 4비트로 바꿈
-    const lo = encodeNibble(d2); // d2를 4비트로 바꿈
-    return (hi << 4) | lo; // hi를 왼쪽으로 4칸 밀고, lo와 합치기
-  }
-
-  /*
- motionJson에는 [{d1, d2, pen}, ...] 형태로 움직임과 펜 상태 내포
- motionJson 배열을 1차원 바이트 배열로 바꿔주는 함수 
- * 작동 순서:
- * 1) 펜 상태가 바뀌면 특별한 값으로 표시
- *    - 0x80 : Pen Down
- *    - 0x08 : Pen Up
- * 2) d1, d2 움직임은 encodeDeltaByte()로 1바이트로 변환
- */
-  function plotEncode(motionJson) {
-    if (!Array.isArray(motionJson)) {
-      throw new Error("plotEncode: motionJson must be an array");
-    }
-
-    const out = []; // 최종 결과를 담을 배열
-    let prevPen = 0; // 펜 처음은 0으로 시작(펜이 띄워져 있는 상태)
-
-    for (let i = 0; i < motionJson.length; i++) {
-      const cmd = motionJson[i];
-      const pen = cmd.pen;
-
-      // 펜 상태가 이전과 다르면, 바뀐 상태를 먼저 기록
-      if (pen !== prevPen) {
-        if (pen === 1) {
-          out.push(0x80); // 펜 내리기
-        } else {
-          out.push(0x08); // 펜 올리기
-        }
-        prevPen = pen; // 펜 상태 갱신
-      }
-
-      // d1, d2 움직임을 1바이트로 변환하여 배열에 추가
-      const byte = encodeDeltaByte(cmd.d1, cmd.d2);
-      out.push(byte);
-    }
-
-    return out; // 완성된 1차원 바이트 배열 반환
-  }
-
-  /**
-   * nibble → d1/d2 값으로 역변환
-   */
-  function decodeNibble(n) {
-    const map = {
-      0b1001: -7,
-      0b1010: -6,
-      0b1011: -5,
-      0b1100: -4,
-      0b1101: -3,
-      0b1110: -2,
-      0b1111: -1,
-      0b0000: 0,
-      0b0001: 1,
-      0b0010: 2,
-      0b0011: 3,
-      0b0100: 4,
-      0b0101: 5,
-      0b0110: 6,
-      0b0111: 7,
-    };
-    return map[n];
-  }
-
-  /**
-   * 1바이트 → (d1,d2)
-   */
-  function decodeDeltaByte(byte) {
-    const hi = (byte >> 4) & 0b1111;
-    const lo = byte & 0b1111;
-    return { d1: decodeNibble(hi), d2: decodeNibble(lo) };
-  }
-
-  /**
-   * plotEncode 배열 → motionJson 배열 역변환
-   */
-  function plotDecode(byteArray) {
-    const out = [];
-    $('pen').d = 0; // 기본 펜 상태
-
-    for (let i = 0; i < byteArray.length; i++) {
-      const b = byteArray[i];
-
-      if (b === 0x80) {
-        // pen down
-        $('pen').d = 1;
-      } else if (b === 0x08) {
-        // pen up
-        $('pen').d = 0;
-      } else {
-        const { d1, d2 } = decodeDeltaByte(b);
-        out.push({ d1, d2, pen: $('pen').d });
-      }
-    }
-
-    return out;
-  }
-
   // SVG 경로
   const totalPoints = svgPathPoints.length;
   const logInterval = Math.max(1, Math.floor(totalPoints / 10));
@@ -492,13 +351,13 @@ function buildMotionJsonFromSvg() {
     prevJ2Deg = ik.joint2;
   }
   if (prevPen !== 0) {
-    motionJson.push({ d1: 0, d2: 0, pen: 0 });
+    plutto.motionJson.push({ d1: 0, d2: 0, pen: 0 });
     prevPen = 0;
   }
   jsonBuilt = true;
 
   console.log(`motionJson 생성 완료!`);
-  console.log(`   - 총 ${motionJson.length}개 명령`);
+  console.log(`   - 총 ${plutto.motionJson.length}개 명령`);
   console.log(
     `   - 처리된 포인트: ${totalPoints - skippedPoints}/${totalPoints}`
   );
@@ -511,16 +370,16 @@ function buildMotionJsonFromSvg() {
   console.log(`   - 모든 움직임 ≤ ${MAX_STEPS_PT} step 보장`);
   console.log("");
   console.log("=== JSON 출력 시작 ===");
-  console.log(JSON.stringify(motionJson));
+  console.log(JSON.stringify(plutto.motionJson));
   console.log("=== JSON 출력 끝 ===");
 
   // ===============================
   // 1) plotEncode
 try {
-  plot = plotEncode(motionJson); // plot: number[] (각 원소 0~255)
+  plutto.plot = plotEncode(plutto.motionJson); // plot: number[] (각 원소 0~255)
 
   console.log("=== plot 출력 시작 (DEC) ===");
-  console.log(JSON.stringify(plot)); // ✅ 10진수 배열로 그대로 출력
+  console.log(JSON.stringify(plutto.plot)); // ✅ 10진수 배열로 그대로 출력
   console.log("=== plot 출력 끝 ===");
 } catch (err) {
   console.error("plotEncode 오류:", err);
@@ -530,18 +389,18 @@ try {
   // 2) plotDecode 테스트
   try {
     // plotEncode 결과를 다시 입력으로 사용
-    const plot = plotEncode(motionJson);
+    const plot = plotEncode(plutto.motionJson);
     const decodedJson = plotDecode(plot);
 
     console.log("=== plot 역변환 출력 시작 ===");
     //console.log(JSON.stringify(decodedJson, null, 2)); // 보기 좋게 들여쓰기
     console.log("=== plot 역변환 출력 끝 ===");
     let is_match = true;
-    for (let i = 0; i < motionJson.length; i++) {
+    for (let i = 0; i < plutto.motionJson.length; i++) {
       if (
-        motionJson[i].d1 !== decodedJson[i].d1 ||
-        motionJson[i].d2 !== decodedJson[i].d2 ||
-        motionJson[i].pen !== decodedJson[i].pen
+        plutto.motionJson[i].d1 !== decodedJson[i].d1 ||
+        plutto.motionJson[i].d2 !== decodedJson[i].d2 ||
+        plutto.motionJson[i].pen !== decodedJson[i].pen
       ) {
         is_match = false;
       }
@@ -551,6 +410,114 @@ try {
     console.error("plotDecode 오류:", err);
   }
 }
+
+function encodeNibble(d) {
+  const map = {
+    [-7]: 0b1001,
+    [-6]: 0b1010,
+    [-5]: 0b1011,
+    [-4]: 0b1100,
+    [-3]: 0b1101,
+    [-2]: 0b1110,
+    [-1]: 0b1111,
+    [0]:  0b0000,
+    [1]:  0b0001,
+    [2]:  0b0010,
+    [3]:  0b0011,
+    [4]:  0b0100,
+    [5]:  0b0101,
+    [6]:  0b0110,
+    [7]:  0b0111,
+  };
+  return map[d];
+}
+
+function decodeNibble(n) {
+  const map = {
+    0b1001: -7,
+    0b1010: -6,
+    0b1011: -5,
+    0b1100: -4,
+    0b1101: -3,
+    0b1110: -2,
+    0b1111: -1,
+    0b0000:  0,
+    0b0001:  1,
+    0b0010:  2,
+    0b0011:  3,
+    0b0100:  4,
+    0b0101:  5,
+    0b0110:  6,
+    0b0111:  7,
+  };
+  return map[n];
+}
+
+function encodeDeltaByte(d1, d2) {
+  const hi = encodeNibble(d1);
+  const lo = encodeNibble(d2);
+  return (hi << 4) | lo;
+}
+
+function decodeDeltaByte(byte) {
+  const hi = (byte >> 4) & 0b1111;
+  const lo = byte & 0b1111;
+  return { d1: decodeNibble(hi), d2: decodeNibble(lo) };
+}
+
+// motionJson -> plot(bytes)
+function plotEncode(motionJson) {
+  if (!Array.isArray(motionJson)) {
+    throw new Error("plotEncode: motionJson must be an array");
+  }
+
+  const out = [];
+  let prevPen = 0;
+
+  for (let i = 0; i < motionJson.length; i++) {
+    const cmd = motionJson[i];
+    const pen = cmd.pen ? 1 : 0;
+
+    if (pen !== prevPen) {
+      out.push(pen === 1 ? 0x80 : 0x08);
+      prevPen = pen;
+    }
+
+    out.push(encodeDeltaByte(cmd.d1, cmd.d2));
+  }
+
+  return out;
+}
+
+// plot(bytes) -> motionJson
+function plotDecode(byteArray) {
+  if (!Array.isArray(byteArray)) {
+    throw new Error("plotDecode: byteArray must be an array");
+  }
+
+  const out = [];
+  let pen = 0; // ✅ 지역 변수로만 처리
+
+  for (let i = 0; i < byteArray.length; i++) {
+    const b = byteArray[i];
+
+    if (b === 0x80) {
+      pen = 1;
+    } else if (b === 0x08) {
+      pen = 0;
+    } else {
+      const { d1, d2 } = decodeDeltaByte(b);
+      out.push({ d1, d2, pen });
+    }
+  }
+
+  return out;
+}
+
+// (선택) 드롭 코드에서 쓰기 쉽게 전역 노출
+window.plotEncode = plotEncode;
+window.plotDecode = plotDecode;
+
 // p5 setup 함수
 function setupSimulator(p) {
   canvasWidth = 1200 * scale + 400;
@@ -1342,7 +1309,7 @@ function drawSimulator(p) {
   p.scale(scale);
 
   // 1) 모션 소스 선택 (JSON or SVG)
-  if (motionJson.length > 0) {
+  if (plutto.motionJson.length > 0) {
     if (drawMode === 3) {
     }
     else if (drawMode === 1) {
@@ -1460,12 +1427,12 @@ function drawSimulator(p) {
   p.pop();
 }
 function downloadPlotTxtDecSpace(filename = "motion_plot.txt") {
-  if (!plot || plot.length === 0) {
+  if (!plutto.plot || plutto.plot.length === 0) {
     alert("plot 비어있음 (plotEncode 먼저 수행됐는지 확인)");
     return;
   }
 
-  const text = plot.join(" "); // ✅ 10진수 공백 구분
+  const text = plutto.plot.join(" "); // ✅ 10진수 공백 구분
 
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -1482,7 +1449,7 @@ function downloadPlotTxtDecSpace(filename = "motion_plot.txt") {
 // 드롭다운 시 svg 재빌드 함수
 window.rebuildFromSvgText = function (svgText) {
   jsonBuilt = false;
-  motionJson = [];
+  plutto.motionJson = [];
   jsonIndex = 0;
   if (typeof trailLayer !== "undefined") trailLayer.clear();
 

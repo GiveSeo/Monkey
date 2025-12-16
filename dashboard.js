@@ -342,6 +342,20 @@ function setupSvgDragDrop(popup_box_selection) {
   if (el.__svg_drop_ready__) return;
   el.__svg_drop_ready__ = true;
 
+  // ---- TXT plot 파서 ----
+  function parsePlotTxt(text) {
+    // "10 20 30 ..." 공백/줄바꿈 구분 허용
+    const arr = text
+      .trim()
+      .split(/\s+/)
+      .map(Number);
+
+    // 0~255 정수만 남기기
+    const bytes = arr.filter(n => Number.isInteger(n) && n >= 0 && n <= 255);
+
+    return bytes;
+  }
+
   // 드래그 오버 시 기본 동작 막고 강조
   el.addEventListener("dragover", (e) => {
     e.preventDefault();
@@ -351,7 +365,7 @@ function setupSvgDragDrop(popup_box_selection) {
   });
 
   // 드래그가 떠나면 강조 해제
-  el.addEventListener("dragleave", (e) => {
+  el.addEventListener("dragleave", () => {
     el.style.outline = "";
     el.style.outlineOffset = "";
   });
@@ -365,17 +379,24 @@ function setupSvgDragDrop(popup_box_selection) {
     const file = e.dataTransfer.files && e.dataTransfer.files[0];
     if (!file) return;
 
-    const isSvg =
-      (file.type === "image/svg+xml") ||
-      file.name.toLowerCase().endsWith(".svg");
+    const lower = (file.name || "").toLowerCase();
 
-    if (!isSvg) {
+    const isSvg =
+      file.type === "image/svg+xml" ||
+      lower.endsWith(".svg");
+
+    const isTxt =
+      file.type === "text/plain" ||
+      lower.endsWith(".txt");
+
+    // ✅ SVG/TXT 둘 다 허용
+    if (!isSvg && !isTxt) {
       lastSvgName = file.name || "(unknown)";
       lastSvgSize = file.size || 0;
-      lastSvgStatus = "Not an SVG ❌";
+      lastSvgStatus = "Unsupported ❌";
       const t = document.getElementById("svg_status_text");
-      if (t) t.textContent = `SVG: ${lastSvgName} | ${lastSvgStatus}`;
-      alert("SVG 파일만 드롭 가능!");
+      if (t) t.textContent = `FILE: ${lastSvgName} | ${lastSvgStatus}`;
+      alert("SVG 또는 TXT(plot) 파일만 드롭 가능!");
       return;
     }
 
@@ -385,43 +406,93 @@ function setupSvgDragDrop(popup_box_selection) {
     lastSvgStatus = "Loading...";
     {
       const t = document.getElementById("svg_status_text");
-      if (t) t.textContent = `SVG: ${lastSvgName} | ${lastSvgStatus}`;
+      if (t) t.textContent = `FILE: ${lastSvgName} | ${lastSvgStatus}`;
     }
 
     try {
-      const svgText = await file.text();     // ✅ SVG 원문 읽기
+      const text = await file.text();
       window.currentSvgName = file.name;
 
-      // 아주 간단한 유효성 체크(옵션)
-      const looksLikeSvg = (svgText && svgText.includes("<svg"));
-      if (!looksLikeSvg) {
-        lastSvgStatus = "Invalid SVG text ❌";
-        const t = document.getElementById("svg_status_text");
-        if (t) t.textContent = `SVG: ${lastSvgName} | ${lastSvgStatus}`;
-        alert("SVG 텍스트가 올바르지 않습니다.");
+      // =========================
+      // 1) SVG 처리
+      // =========================
+      if (isSvg) {
+        const looksLikeSvg = (text && text.includes("<svg"));
+        if (!looksLikeSvg) {
+          lastSvgStatus = "Invalid SVG text ❌";
+          const t = document.getElementById("svg_status_text");
+          if (t) t.textContent = `FILE: ${lastSvgName} | ${lastSvgStatus}`;
+          alert("SVG 텍스트가 올바르지 않습니다.");
+          return;
+        }
+
+        if (typeof window.rebuildFromSvgText === "function") {
+          window.rebuildFromSvgText(text);
+
+          const kb = (lastSvgSize / 1024).toFixed(1);
+          lastSvgStatus = `SVG Loaded ✅ (${kb} KB)`;
+          const t = document.getElementById("svg_status_text");
+          if (t) t.textContent = `FILE: ${lastSvgName} | ${lastSvgStatus}`;
+        } else {
+          lastSvgStatus = "rebuildFromSvgText() missing ❌";
+          const t = document.getElementById("svg_status_text");
+          if (t) t.textContent = `FILE: ${lastSvgName} | ${lastSvgStatus}`;
+          alert("rebuildFromSvgText()가 없습니다. Sketch.js에 전역 함수로 추가해줘.");
+        }
         return;
       }
 
-      if (typeof window.rebuildFromSvgText === "function") {
-        window.rebuildFromSvgText(svgText); // ✅ Sketch 파이프라인 호출
+      // =========================
+      // 2) TXT(plot) 처리
+      // =========================
+      if (isTxt) {
+        // plotDecode가 전역이어야 함
+        if (typeof window.plotDecode !== "function" && typeof plotDecode !== "function") {
+          lastSvgStatus = "plotDecode() missing ❌";
+          const t = document.getElementById("svg_status_text");
+          if (t) t.textContent = `FILE: ${lastSvgName} | ${lastSvgStatus}`;
+          alert("plotDecode()가 없습니다. plotDecode를 전역(window.plotDecode)으로 빼주세요.");
+          return;
+        }
 
-        // ✅ 성공 상태 표시
+        const bytes = parsePlotTxt(text);
+        if (bytes.length === 0) {
+          lastSvgStatus = "TXT empty/invalid ❌";
+          const t = document.getElementById("svg_status_text");
+          if (t) t.textContent = `FILE: ${lastSvgName} | ${lastSvgStatus}`;
+          alert("TXT에 유효한 0~255 숫자(byte)가 없습니다.");
+          return;
+        }
+
+        // 1) plutto.plot에 저장
+        plutto.plot = bytes;
+
+        // 2) decode 해서 motionJson 생성
+        const decoder = (typeof plotDecode === "function") ? plotDecode : window.plotDecode;
+        const motion = decoder(bytes);
+
+        plutto.motionJson = motion;
+
+        // 3) 재생 상태 초기화(있으면)
+        if (typeof startJsonPlayback === "function") {
+          jsonBuilt = true;
+          startJsonPlayback();
+        }
+
         const kb = (lastSvgSize / 1024).toFixed(1);
-        lastSvgStatus = `Loaded ✅ (${kb} KB)`;
+        lastSvgStatus = `TXT Plot Loaded ✅ (${kb} KB, ${bytes.length} bytes, ${motion.length} cmds)`;
         const t = document.getElementById("svg_status_text");
-        if (t) t.textContent = `SVG: ${lastSvgName} | ${lastSvgStatus}`;
-      } else {
-        lastSvgStatus = "rebuildFromSvgText() missing ❌";
-        const t = document.getElementById("svg_status_text");
-        if (t) t.textContent = `SVG: ${lastSvgName} | ${lastSvgStatus}`;
-        alert("rebuildFromSvgText()가 없습니다. Sketch.js에 전역 함수로 추가해줘.");
+        if (t) t.textContent = `FILE: ${lastSvgName} | ${lastSvgStatus}`;
+
+        return;
       }
     } catch (err) {
       console.error(err);
       lastSvgStatus = "Read failed ❌";
       const t = document.getElementById("svg_status_text");
-      if (t) t.textContent = `SVG: ${lastSvgName} | ${lastSvgStatus}`;
-      alert("SVG 읽기 실패");
+      if (t) t.textContent = `FILE: ${lastSvgName} | ${lastSvgStatus}`;
+      alert(`파일 읽기/처리 실패: ${err?.message || err}`);
     }
   });
 }
+
