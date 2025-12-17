@@ -211,17 +211,17 @@ function dashboard() {
     console.log("manual drawing mode activated");
   });
 
-  const drawDoubleBtm = frame.append("g");
-  createButton(drawDoubleBtm, [300, 50, 430], "svg_draw_double_btn", "SVG Draw Double");
+  const drawFastBtm = frame.append("g");
+  createButton(drawFastBtm, [300, 50, 430], "svg_draw_fast_btn", "SVG Draw Fast");
 
-  select("#svg_draw_double_btn").on("click", () => {
+  select("#svg_draw_fast_btn").on("click", () => {
     // 재생 시작
     drawMode = 2;
     $('pen').d = 0;
     startJsonPlayback();
     $("encoder.joint_1").d = currentAngleJoint1;
     $("encoder.joint_2").d = currentAngleJoint2;
-    console.log("SVG drawing Double mode activated");
+    console.log("SVG drawing Fast mode activated");
   });
 
   const drawAllBtm = frame.append("g");
@@ -235,7 +235,7 @@ function dashboard() {
     bakeAllToTrailLayer(); 
     $("encoder.joint_1").d = currentAngleJoint1;
     $("encoder.joint_2").d = currentAngleJoint2;
-    console.log("SVG drawing Double mode activated");
+    console.log("SVG drawing All mode activated");
   });
 
   createButton(frame, [200, 20, 510], "download_txt_btn", "Download TXT", () => {
@@ -516,7 +516,6 @@ function downloadPlotTxtDecSpace(filename = "motion_plot.txt") {
 }
 // 드롭다운 시 svg 재빌드 함수
 window.rebuildFromSvgText = function (svgText) {
-  // UI쪽만 초기화
   if (typeof trailLayer !== "undefined") trailLayer.clear();
 
   // 엔진 처리: plutto에게 위임

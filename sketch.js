@@ -7,29 +7,6 @@ function sketch() {
   }, "p5-canvas");
 }
 
-function normalizeAngle(angle) {
-  // angle을 -180 ~ 180 범위로 정규화
-  while (angle > 180) angle -= 360;
-  while (angle < -180) angle += 360;
-  return angle;
-}
-// 순방향 운동학 함수 (각도 → 펜 좌표)
-function fkPenXY_deg(j1Deg, j2Deg) {
-  const theta1 = (j1Deg * Math.PI / 180) * -1;
-
-  const physicalJ2 = j2Deg + JOINT2_OFFSET;
-  const theta2 = (physicalJ2 * Math.PI / 180) * -1;
-
-  const theta1_fk = theta1 + upperRestAngle;
-
-  const x2 = baseX + link1Length * Math.cos(theta1_fk);
-  const y2 = baseY + link1Length * Math.sin(theta1_fk);
-
-  const x3 = x2 + link2Length * Math.cos(theta1_fk + theta2);
-  const y3 = y2 + link2Length * Math.sin(theta1_fk + theta2);
-
-  return { x: x3, y: y3 };
-}
 
 // 그리기 모드
 let drawMode = 0;
@@ -44,14 +21,10 @@ let bakedOnce = false; // 한번에 그릴 것인지 여부
 //   pen: 0(업), 1(다운)
 let jsonIndex = 0;
 
-// 실제 로봇팔 스케일
-const SVG_BOX_SIZE = 250;
 // =======================
 // 기존 전역 변수들
 // =======================
-const MAX_DELTA_DEG = STEP_DEG * MAX_STEPS_PT; // 0.07도
 const JOINT2_OFFSET = 143; // joint2가 0도일 때, 팔이 ㄷ자 모양이 되도록 오프셋 각도
-
 
 // 이미지 기준 기본 각도
 let upperRestAngle = 0; // upperarm 이미지 기울어진 각도
@@ -79,26 +52,12 @@ let maxJoint2 = -1e9;
 
 const scale = 0.7; // 전체 캔버스 스케일
 const moreHeight = 100;
-const imageScale = 0.5; // PNG 이미지 자체 스케일
 
 function J1_MIN() { return plutto.minJoint1; }
 function J1_MAX() { return plutto.maxJoint1; }
 function J2_MIN() { return plutto.minJoint2; }
 function J2_MAX() { return plutto.maxJoint2; }
 
-// 이미지 기준 팔 관절 픽셀 좌표 (길이 구하거나, 각도 측정시 필요)
-const TOP_JOINT_X = 220;
-const TOP_JOINT_Y = 547;
-
-const UPPER_JOINT_BASE_X = 747;
-const UPPER_JOINT_BASE_Y = 226;
-const UPPER_JOINT_ELBOW_X = 195;
-const UPPER_JOINT_ELBOW_Y = 383;
-
-const FORE_JOINT_ELBOW_X = 195;
-const FORE_JOINT_ELBOW_Y = 385;
-const FORE_PEN_X = 778;
-const FORE_PEN_Y = 612;
 
 // 재생 관련 상태
 let isPlaying = false;
@@ -131,8 +90,8 @@ function playJsonStep() {
   const cmd = plutto.motionJson[jsonIndex];
 
   // d1, d2는 step 증분이니까 각도로 변환
-  const deltaDeg1 = cmd.d1 * STEP_DEG;
-  const deltaDeg2 = cmd.d2 * STEP_DEG;
+  const deltaDeg1 = cmd.d1 * plutto.STEP_DEG;
+  const deltaDeg2 = cmd.d2 * plutto.STEP_DEG;
 
   // 각도 적용
   currentAngleJoint1 += normalizeAngle(deltaDeg1);
@@ -158,8 +117,8 @@ function playJsonStepAndBake() {
   // 1) 한 스텝 진행 (기존 playJsonStep 내용)
   const cmd = plutto.motionJson[jsonIndex];
 
-  const deltaDeg1 = cmd.d1 * STEP_DEG;
-  const deltaDeg2 = cmd.d2 * STEP_DEG;
+  const deltaDeg1 = cmd.d1 * plutto.STEP_DEG;
+  const deltaDeg2 = cmd.d2 * plutto.STEP_DEG;
 
   currentAngleJoint1 += normalizeAngle(deltaDeg1);
   currentAngleJoint2 += normalizeAngle(deltaDeg2);
@@ -411,21 +370,20 @@ function drawSimulator(p) {
 
   //    joint2: 새 기준(0이었던 곳이 140)이므로,
   //    물리각 = currentAngleJoint2 + 140
-  const physicalJ2 = currentAngleJoint2 + JOINT2_OFFSET;
+  const physicalJ2 = currentAngleJoint2 + plutto.JOINT2_OFFSET;
   const theta2 = p.radians(physicalJ2) * -1;
 
-  const theta1_fk = theta1 + upperRestAngle;
+  const theta1_fk = theta1 + plutto.upperRestAngle;
 
-  const x2 = baseX + link1Length * p.cos(theta1_fk);
-  const y2 = baseY + link1Length * p.sin(theta1_fk);
+  const x2 = plutto.baseX + plutto.link1 * p.cos(theta1_fk);
+  const y2 = plutto.baseY + plutto.link1 * p.sin(theta1_fk);
 
-  const x3 = x2 + link2Length * p.cos(theta1_fk + theta2);
-  const y3 = y2 + link2Length * p.sin(theta1_fk + theta2);
-
+  const x3 = x2 + plutto.link2 * p.cos(theta1_fk + theta2);
+  const y3 = y2 + plutto.link2 * p.sin(theta1_fk + theta2);
   // 3) Upperarm 렌더링
   if (imgUpper) {
     p.push();
-    p.translate(baseX, baseY);
+    p.translate(plutto.baseX, plutto.baseY);
     p.rotate(theta1); // upper는 joint1만 반영
     p.scale(imageScale);
     p.image(imgUpper, -UPPER_JOINT_BASE_X, -UPPER_JOINT_BASE_Y);
@@ -497,8 +455,8 @@ function drawSimulator(p) {
   p.text(`J2: ${currentAngleJoint2.toFixed(2)} deg`, 50, 70);
   p.text(`L1: ${link1Length.toFixed(0)}px`, 50, 90);
   p.text(`L2: ${link2Length.toFixed(0)}px`, 50, 110);
-  p.text(`Pen X: ${x3.toFixed(1)} px`, 50, 130);  // ★ 추가
-  p.text(`Pen Y: ${y3.toFixed(1)} px`, 50, 150); // ★ 추가
+  p.text(`Pen X: ${x3.toFixed(1)} px`, 50, 130);  
+  p.text(`Pen Y: ${y3.toFixed(1)} px`, 50, 150); 
 
   p.text(isPlaying ? "Playing" : "Paused", 50, 170);
   p.text(`Pen: ${$('pen').d}`, 50, 190);
