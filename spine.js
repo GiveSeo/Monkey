@@ -1,4 +1,4 @@
-// 로봇 팔 이미지 정보
+// 로봇 팔 이미지 정보 (plot 생성시 꼭 필요한 정보들)
 const TOP_JOINT_X = 220;
 const TOP_JOINT_Y = 547;
 
@@ -13,7 +13,7 @@ const FORE_PEN_X = 778;
 const FORE_PEN_Y = 612;
 const imageScale = 0.5;
 
-class Plutto {
+class Plotto {
     #minEncoderJoint1 = -30;
     #maxEncoderJoint1 = 180;
     #minEncoderJoint2 = -100;
@@ -92,38 +92,38 @@ class Plutto {
     get minJoint1() {
         return this.#minEncoderJoint1;
     }
-    set minJoint1(value) {
-        this.#minEncoderJoint1 = value;
+    set minJoint1(v) {
+        this.#minEncoderJoint1 = v;
     }
     get maxJoint1() {
         return this.#maxEncoderJoint1;
     }
-    set maxJoint1(value) {
-        this.#maxEncoderJoint1 = value;
+    set maxJoint1(v) {
+        this.#maxEncoderJoint1 = v;
     }
     get minJoint2() {
         return this.#minEncoderJoint2;
     }
-    set minJoint2(value) {
-        this.#minEncoderJoint2 = value;
+    set minJoint2(v) {
+        this.#minEncoderJoint2 = v;
     }
     get maxJoint2() {
         return this.#maxEncoderJoint2;
     }
-    set maxJoint2(value) {
-        this.#maxEncoderJoint2 = value;
+    set maxJoint2(v) {
+        this.#maxEncoderJoint2 = v;
     }
     get motionJson() {
         return this.#motionJson;
     }
-    set motionJson(value) {
-        this.#motionJson = Array.isArray(value) ? value : [];
+    set motionJson(v) {
+        this.#motionJson = Array.isArray(v) ? v : [];
     }
     get plot() {
         return this.#plot;
     }
-    set plot(value) {
-        this.#plot = Array.isArray(value) ? value : [];
+    set plot(v) {
+        this.#plot = Array.isArray(v) ? v : [];
     }
     //설정 함수
     configure({
@@ -274,7 +274,7 @@ class Plutto {
         // 4) 각도 변화량 제한으로 리샘플
         fitted = resamplePathByAngle(fitted, maxDelta);
 
-        // 5) plutto 상태로 저장
+        // 5) plotto 상태로 저장
         this.svgPathPoints = fitted;
         this.jsonBuilt = false;
 
@@ -955,15 +955,15 @@ function normalizeToBox(points) {
     const w = Math.max(1e-9, maxX - minX);
     const h = Math.max(1e-9, maxY - minY);
 
-    const s = plutto.SVG_BOX_SIZE / Math.max(w, h);
+    const s = plotto.SVG_BOX_SIZE / Math.max(w, h);
 
     // 스케일된 결과의 크기
     const newW = w * s;
     const newH = h * s;
 
     // 남는 여백을 반씩 → 중앙정렬
-    const offX = (plutto.SVG_BOX_SIZE - newW) / 2;
-    const offY = (plutto.SVG_BOX_SIZE - newH) / 2;
+    const offX = (plotto.SVG_BOX_SIZE - newW) / 2;
+    const offY = (plotto.SVG_BOX_SIZE - newH) / 2;
 
     return points.map(p => ({
         x: (p.x - minX) * s + offX,
@@ -973,11 +973,11 @@ function normalizeToBox(points) {
 }
 // SVG 박스 좌표계 → 로봇 작업공간 좌표계 매핑 함수
 function mapBoxToRobotTargets(points, k = 1.0, flipY = false) {
-    const home = plutto.fkPenXY_deg(0, 0);
+    const home = plotto.fkPenXY_deg(0, 0);
 
     return points.map(p => {
         const u = p.x;
-        const v = flipY ? (plutto.SVG_BOX_SIZE - p.y) : p.y;
+        const v = flipY ? (plotto.SVG_BOX_SIZE - p.y) : p.y;
 
         return {
             x: home.x + u * k,
@@ -988,12 +988,12 @@ function mapBoxToRobotTargets(points, k = 1.0, flipY = false) {
 }
 
 // 각도 변화량 기준 리샘플링
-function resamplePathByAngle(points, maxDeltaDeg = plutto.MAX_DELTA_DEG) {
+function resamplePathByAngle(points, maxDeltaDeg = plotto.MAX_DELTA_DEG) {
     if (!points || points.length === 0) return [];
 
     const result = [];
     const first = points[0];
-    let prevIK = plutto.inverseKinematics2DOF(first.x, first.y, null, null);
+    let prevIK = plotto.inverseKinematics2DOF(first.x, first.y, null, null);
     if (!prevIK) {
         console.warn("IK failed at first point in resamplePathByAngle");
         return points;
@@ -1002,11 +1002,11 @@ function resamplePathByAngle(points, maxDeltaDeg = plutto.MAX_DELTA_DEG) {
 
     function subdivide(p0, ik0, p1, depth = 0) {
         if (depth > 20) {
-            const ik1_fallback = plutto.inverseKinematics2DOF(p1.x, p1.y, ik0.joint1, ik0.joint2) || ik0;
+            const ik1_fallback = plotto.inverseKinematics2DOF(p1.x, p1.y, ik0.joint1, ik0.joint2) || ik0;
             return [{ point: p1, ik: ik1_fallback }];
         }
 
-        const ik1 = plutto.inverseKinematics2DOF(p1.x, p1.y, ik0.joint1, ik0.joint2);
+        const ik1 = plotto.inverseKinematics2DOF(p1.x, p1.y, ik0.joint1, ik0.joint2);
         if (!ik1) {
             return [{ point: p1, ik: ik0 }];
         }
@@ -1025,7 +1025,7 @@ function resamplePathByAngle(points, maxDeltaDeg = plutto.MAX_DELTA_DEG) {
             pen: p1.pen,  // ★ 목적지의 펜 상태를 유지
         };
 
-        const ikMid = plutto.inverseKinematics2DOF(mid.x, mid.y, ik0.joint1, ik0.joint2);
+        const ikMid = plotto.inverseKinematics2DOF(mid.x, mid.y, ik0.joint1, ik0.joint2);
         if (!ikMid) {
             return [{ point: p1, ik: ik1 }];
         }
@@ -1160,14 +1160,14 @@ function plotDecode(byteArray) {
 }
 
 // --------인스턴스-------------
-const plutto = new Plutto();
+const plotto = new Plotto();
 
-plutto.configure({
+plotto.configure({
     baseX: 0,
     baseY: 0,
     JOINT2_OFFSET: 143,
-    STEP_DEG: plutto.STEP_DEG,
-    MAX_STEPS_PT: plutto.MAX_STEPS_PT,
+    STEP_DEG: plotto.STEP_DEG,
+    MAX_STEPS_PT: plotto.MAX_STEPS_PT,
     SVG_BOX_SIZE: 250,
 });
 let wait, wait_forever;
@@ -1185,11 +1185,11 @@ async function setup(spine) {
 }
 
 function degToStep(deg) {
-    return Math.round(deg / plutto.STEP_DEG);
+    return Math.round(deg / plotto.STEP_DEG);
 }
 
 function stepToDeg(step) {
-    return step * plutto.STEP_DEG;
+    return step * plotto.STEP_DEG;
 }
 
 function serialize() {

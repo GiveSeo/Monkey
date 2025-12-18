@@ -6,7 +6,7 @@
 let init = false;
 // angles[0] = J1, angles[1] = J2
 let angles = [0, 0];
-// 모드 전환용 변수, false = SVG, true = Plutto FK 모드
+// 모드 전환용 변수, false = SVG, true = Plotto FK 모드
 
 // 슬라이더가 지정하는 목표 각도
 let targetAngles = [0, 0];
@@ -464,17 +464,17 @@ function setupSvgDragDrop(popup_box_selection) {
           return;
         }
 
-        // 1) plutto.plot에 저장
-        plutto.plot = bytes;
+        // 1) plotto.plot에 저장
+        plotto.plot = bytes;
 
         // 2) decode 해서 motionJson 생성
         const decoder = (typeof plotDecode === "function") ? plotDecode : window.plotDecode;
         const motion = decoder(bytes);
 
-        plutto.motionJson = motion;
+        plotto.motionJson = motion;
 
         // 3) 재생 상태 초기화(있으면)
-        plutto.jsonBuilt = true;
+        plotto.jsonBuilt = true;
         if (typeof startJsonPlayback === "function") startJsonPlayback();
 
         const kb = (lastSvgSize / 1024).toFixed(1);
@@ -495,12 +495,12 @@ function setupSvgDragDrop(popup_box_selection) {
 }
 // === 플롯 TXT 다운로드 함수 (10진수 공백 구분) ===
 function downloadPlotTxtDecSpace(filename = "motion_plot.txt") {
-  if (!plutto.plot || plutto.plot.length === 0) {
+  if (!plotto.plot || plotto.plot.length === 0) {
     alert("plot 비어있음 (plotEncode 먼저 수행됐는지 확인)");
     return;
   }
 
-  const text = plutto.plot.join(" "); // ✅ 10진수 공백 구분
+  const text = plotto.plot.join(" "); // ✅ 10진수 공백 구분
 
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -518,11 +518,11 @@ function downloadPlotTxtDecSpace(filename = "motion_plot.txt") {
 window.rebuildFromSvgText = function (svgText) {
   if (typeof trailLayer !== "undefined") trailLayer.clear();
 
-  // 엔진 처리: plutto에게 위임
-  if (plutto && typeof plutto.buildFromSvgText === "function") {
-    plutto.buildFromSvgText(svgText);
+  // 엔진 처리: plotto에게 위임
+  if (plotto && typeof plotto.buildFromSvgText === "function") {
+    plotto.buildFromSvgText(svgText);
   } else {
-    console.error("plutto.buildFromSvgText가 없습니다.");
+    console.error("plotto.buildFromSvgText가 없습니다.");
     return;
   }
 

@@ -53,10 +53,10 @@ let maxJoint2 = -1e9;
 const scale = 0.7; // 전체 캔버스 스케일
 const moreHeight = 100;
 
-function J1_MIN() { return plutto.minJoint1; }
-function J1_MAX() { return plutto.maxJoint1; }
-function J2_MIN() { return plutto.minJoint2; }
-function J2_MAX() { return plutto.maxJoint2; }
+function J1_MIN() { return plotto.minJoint1; }
+function J1_MAX() { return plotto.maxJoint1; }
+function J2_MIN() { return plotto.minJoint2; }
+function J2_MAX() { return plotto.maxJoint2; }
 
 
 // 재생 관련 상태
@@ -83,15 +83,15 @@ function openRobotPopup() {
 }
 
 function playJsonStep() {
-  if (jsonIndex >= plutto.motionJson.length) {
+  if (jsonIndex >= plotto.motionJson.length) {
     return;
   }
 
-  const cmd = plutto.motionJson[jsonIndex];
+  const cmd = plotto.motionJson[jsonIndex];
 
   // d1, d2는 step 증분이니까 각도로 변환
-  const deltaDeg1 = cmd.d1 * plutto.STEP_DEG;
-  const deltaDeg2 = cmd.d2 * plutto.STEP_DEG;
+  const deltaDeg1 = cmd.d1 * plotto.STEP_DEG;
+  const deltaDeg2 = cmd.d2 * plotto.STEP_DEG;
 
   // 각도 적용
   currentAngleJoint1 += normalizeAngle(deltaDeg1);
@@ -112,13 +112,13 @@ currentAngleJoint2 = Math.max(J2_MIN(), Math.min(J2_MAX(), currentAngleJoint2));
 }
 
 function playJsonStepAndBake() {
-  if (jsonIndex >= plutto.motionJson.length) return false;
+  if (jsonIndex >= plotto.motionJson.length) return false;
 
   // 1) 한 스텝 진행 (기존 playJsonStep 내용)
-  const cmd = plutto.motionJson[jsonIndex];
+  const cmd = plotto.motionJson[jsonIndex];
 
-  const deltaDeg1 = cmd.d1 * plutto.STEP_DEG;
-  const deltaDeg2 = cmd.d2 * plutto.STEP_DEG;
+  const deltaDeg1 = cmd.d1 * plotto.STEP_DEG;
+  const deltaDeg2 = cmd.d2 * plotto.STEP_DEG;
 
   currentAngleJoint1 += normalizeAngle(deltaDeg1);
   currentAngleJoint2 += normalizeAngle(deltaDeg2);
@@ -135,7 +135,7 @@ function playJsonStepAndBake() {
   // 2) ✅ “이 스텝의 결과”를 trailLayer에 굽기
   if (!trailLayer) return true;
 
-  const pos = plutto.fkPenXY_deg(currentAngleJoint1, currentAngleJoint2); // 전역 fk 사용
+  const pos = plotto.fkPenXY_deg(currentAngleJoint1, currentAngleJoint2); // 전역 fk 사용
   const penScreenX = pos.x * scale;
   const penScreenY = pos.y * scale;
 
@@ -162,7 +162,7 @@ function playJsonStepAndBake() {
 
 function startJsonPlayback(jsonData) {
   if (jsonData) {
-    plutto.motionJson = jsonData;
+    plotto.motionJson = jsonData;
   }
   jsonIndex = 0;
   isPlaying = false;
@@ -200,10 +200,10 @@ function bakeAllToTrailLayer() {
 
   let prevX = null, prevY = null, prevPen = 0;
 
-  while (jsonIndex < plutto.motionJson.length) {
+  while (jsonIndex < plotto.motionJson.length) {
     playJsonStep();
 
-    const pos = plutto.fkPenXY_deg(currentAngleJoint1, currentAngleJoint2);
+    const pos = plotto.fkPenXY_deg(currentAngleJoint1, currentAngleJoint2);
     const x = pos.x * scale;
     const y = pos.y * scale;
 
@@ -251,7 +251,7 @@ function setupSimulator(p) {
   // 베이스 위치 계산
   initBasePosition();
 
-  plutto.configure({
+  plotto.configure({
     baseX,
     baseY,
     link1Length,
@@ -351,7 +351,7 @@ function drawSimulator(p) {
   p.scale(scale);
 
   // 1) 모션 소스 선택 (JSON or SVG)
-  if (plutto.motionJson.length > 0) {
+  if (plotto.motionJson.length > 0) {
     if (drawMode === 3) {
     }
     else if (drawMode === 1) {
@@ -370,20 +370,20 @@ function drawSimulator(p) {
 
   //    joint2: 새 기준(0이었던 곳이 140)이므로,
   //    물리각 = currentAngleJoint2 + 140
-  const physicalJ2 = currentAngleJoint2 + plutto.JOINT2_OFFSET;
+  const physicalJ2 = currentAngleJoint2 + plotto.JOINT2_OFFSET;
   const theta2 = p.radians(physicalJ2) * -1;
 
-  const theta1_fk = theta1 + plutto.upperRestAngle;
+  const theta1_fk = theta1 + plotto.upperRestAngle;
 
-  const x2 = plutto.baseX + plutto.link1 * p.cos(theta1_fk);
-  const y2 = plutto.baseY + plutto.link1 * p.sin(theta1_fk);
+  const x2 = plotto.baseX + plotto.link1 * p.cos(theta1_fk);
+  const y2 = plotto.baseY + plotto.link1 * p.sin(theta1_fk);
 
-  const x3 = x2 + plutto.link2 * p.cos(theta1_fk + theta2);
-  const y3 = y2 + plutto.link2 * p.sin(theta1_fk + theta2);
+  const x3 = x2 + plotto.link2 * p.cos(theta1_fk + theta2);
+  const y3 = y2 + plotto.link2 * p.sin(theta1_fk + theta2);
   // 3) Upperarm 렌더링
   if (imgUpper) {
     p.push();
-    p.translate(plutto.baseX, plutto.baseY);
+    p.translate(plotto.baseX, plotto.baseY);
     p.rotate(theta1); // upper는 joint1만 반영
     p.scale(imageScale);
     p.image(imgUpper, -UPPER_JOINT_BASE_X, -UPPER_JOINT_BASE_Y);
