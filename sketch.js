@@ -251,7 +251,7 @@ function setupSimulator(p) {
   // 베이스 위치 계산
   initBasePosition();
 
-  plutto.setKinematics({
+  plutto.configure({
     baseX,
     baseY,
     link1Length,

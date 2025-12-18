@@ -125,23 +125,7 @@ class Plutto {
     set plot(value) {
         this.#plot = Array.isArray(value) ? value : [];
     }
-    setKinematics({
-        baseX,
-        baseY,
-        link1Length,
-        link2Length,
-        upperRestAngle,
-        foreRestAngle,
-        JOINT2_OFFSET,
-    }) {
-        this.baseX = baseX;
-        this.baseY = baseY;
-        this.link1 = link1Length;
-        this.link2 = link2Length;
-        this.upperRestAngle = upperRestAngle;
-        this.foreRestAngle = foreRestAngle;
-        this.JOINT2_OFFSET = JOINT2_OFFSET;
-    }
+    //설정 함수
     configure({
         baseX, baseY,
         link1Length, link2Length,
@@ -150,19 +134,18 @@ class Plutto {
         SVG_BOX_SIZE,
         STEP_DEG,
         MAX_STEPS_PT,
-        // (선택) joint limit도 같이 받고 싶으면
+        // (선택) joint limit
         minJoint1, maxJoint1, minJoint2, maxJoint2,
     } = {}) {
-        // 1) kinematics
-        this.setKinematics({
-            baseX,
-            baseY,
-            link1Length,
-            link2Length,
-            upperRestAngle,
-            foreRestAngle,
-            JOINT2_OFFSET,
-        });
+
+        // 1) kinematics (기존 setKinematics 내용 합침)
+        if (baseX !== undefined) this.baseX = baseX;
+        if (baseY !== undefined) this.baseY = baseY;
+        if (link1Length !== undefined) this.link1 = link1Length;
+        if (link2Length !== undefined) this.link2 = link2Length;
+        if (upperRestAngle !== undefined) this.upperRestAngle = upperRestAngle;
+        if (foreRestAngle !== undefined) this.foreRestAngle = foreRestAngle;
+        if (JOINT2_OFFSET !== undefined) this.JOINT2_OFFSET = JOINT2_OFFSET;
 
         // 2) svg / quantization
         if (SVG_BOX_SIZE !== undefined) this.SVG_BOX_SIZE = SVG_BOX_SIZE;
@@ -181,7 +164,6 @@ class Plutto {
         this.plot = [];
         this.initLinkGeometry();
     }
-
     fkPenXY_deg(j1Deg, j2Deg) {
         const theta1 = (j1Deg * Math.PI / 180) * -1;
 
@@ -451,10 +433,10 @@ class Plutto {
     }
 }
 function normalizeAngle(angle) {
-  // angle을 -180 ~ 180 범위로 정규화
-  while (angle > 180) angle -= 360;
-  while (angle < -180) angle += 360;
-  return angle;
+    // angle을 -180 ~ 180 범위로 정규화
+    while (angle > 180) angle -= 360;
+    while (angle < -180) angle += 360;
+    return angle;
 }
 // SVG 경로에서 포인트 추출 함수
 function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
@@ -1181,12 +1163,12 @@ function plotDecode(byteArray) {
 const plutto = new Plutto();
 
 plutto.configure({
-  baseX: 0,
-  baseY: 0,
-  JOINT2_OFFSET: 143,
-  STEP_DEG: plutto.STEP_DEG,
-  MAX_STEPS_PT: plutto.MAX_STEPS_PT,
-  SVG_BOX_SIZE: 250,
+    baseX: 0,
+    baseY: 0,
+    JOINT2_OFFSET: 143,
+    STEP_DEG: plutto.STEP_DEG,
+    MAX_STEPS_PT: plutto.MAX_STEPS_PT,
+    SVG_BOX_SIZE: 250,
 });
 let wait, wait_forever;
 
