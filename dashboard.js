@@ -516,7 +516,6 @@ function downloadPlotTxtDecSpace(filename = "motion_plot.txt") {
 }
 // 드롭다운 시 svg 재빌드 함수
 window.rebuildFromSvgText = function (svgText) {
-  if (typeof trailLayer !== "undefined") trailLayer.clear();
 
   // 엔진 처리: plotto에게 위임
   if (plotto && typeof plotto.buildFromSvgText === "function") {
