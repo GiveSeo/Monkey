@@ -263,7 +263,12 @@ class Plotto {
         const maxDelta = opts.maxDeltaDeg ?? this.MAX_DELTA_DEG;
 
         // 1) SVG -> raw points
-        const rawPts = extractPathPointsFromSvg(svgText, sampleStep);
+        const rawPts = extractPathPointsFromSvg(svgText, {
+            samplesPerPath: 350,      // path 하나를 대략 200등분
+            maxSamplesPerPath: 4000,  // path 하나당 최대 점 개수
+            maxStepClamp: 2,          // 긴 path가 너무 듬성해지지 않게
+            bridgeScale: 1.0,         // path 사이 pen-up 이동 밀도
+        });
 
         // 2) raw -> 정규화 박스
         const ptsBox = normalizeToBox(rawPts);
@@ -439,11 +444,18 @@ function normalizeAngle(angle) {
     return angle;
 }
 // SVG 경로에서 포인트 추출 함수
-function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
+function extractPathPointsFromSvg(svgText, opts = {}) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(svgText, "image/svg+xml");
     const svgRoot = doc.documentElement;
 
+    const {
+        sampleStep = null,        // 숫자면 고정 step, null/undefined면 자동 step
+        maxStepClamp = 2,        // 너무 듬성 방지 (px 단위)
+        samplesPerPath = 200,       // ⭐ 추가: path별 목표 등분 수
+        maxSamplesPerPath = 3000,   // ⭐ 추가: minStep 없이 폭주 방지
+        bridgeScale = 1.0,        // shape 연결 pen-up 이동의 step에 곱할 스케일(원하면)
+    } = opts;
     const points = [];
 
     // 브라우저 임시 svg
@@ -779,6 +791,8 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
         return { element: ref, transform: m, tagName };
     }
 
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
     // 실제로 그려질 요소 수집
     const allElements = [];
 
@@ -806,9 +820,10 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
         document.body.removeChild(tempSvg);
         return points;
     }
+    const prepared = []; // { dAttr, transformMatrix, tagName, length }
+    let minLen = Infinity;
 
-    // 각 shape에 따라 처리
-    allElements.forEach((info) => {
+    for (const info of allElements) {
         const el = info.element;
         const tagName = info.tagName;
 
@@ -817,13 +832,13 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
 
         if (tagName === "path") {
             dAttr = el.getAttribute("d");
-            // path는 transform을 svg에 맡기기 위해 matrix로 넘김
+            // transformMatrix는 그대로 pathEl의 transform으로 넘길 것
         } else if (tagName === "circle") {
             const cx = parseFloat(el.getAttribute("cx")) || 0;
             const cy = parseFloat(el.getAttribute("cy")) || 0;
             const r = parseFloat(el.getAttribute("r")) || 0;
             dAttr = circleToPath(cx, cy, r, transformMatrix);
-            transformMatrix = null; // 이미 좌표에 반영했으므로
+            transformMatrix = null;
         } else if (tagName === "ellipse") {
             const cx = parseFloat(el.getAttribute("cx")) || 0;
             const cy = parseFloat(el.getAttribute("cy")) || 0;
@@ -857,57 +872,90 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
             transformMatrix = null;
         }
 
-        if (!dAttr) return;
+        if (!dAttr) continue;
 
-        const pathEl = document.createElementNS(
-            "http://www.w3.org/2000/svg",
-            "path"
-        );
+        const pathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
         pathEl.setAttribute("d", dAttr);
 
         if (transformMatrix) {
             const m = transformMatrix;
-            pathEl.setAttribute(
-                "transform",
-                `matrix(${m.a},${m.b},${m.c},${m.d},${m.e},${m.f})`
-            );
+            pathEl.setAttribute("transform", `matrix(${m.a},${m.b},${m.c},${m.d},${m.e},${m.f})`);
         }
 
         tempSvg.appendChild(pathEl);
 
-        let totalLength;
+        let L = 0;
         try {
-            totalLength = pathEl.getTotalLength();
+            L = pathEl.getTotalLength();
         } catch (e) {
-            console.warn("getTotalLength 실패, 이 shape는 스킵:", tagName, e);
             tempSvg.removeChild(pathEl);
-            return;
+            continue;
         }
 
-        if (!totalLength || totalLength === 0) {
-            tempSvg.removeChild(pathEl);
-            return;
+        tempSvg.removeChild(pathEl);
+
+        if (L > 0) {
+            minLen = Math.min(minLen, L);
+            prepared.push({ dAttr, transformMatrix, tagName, length: L });
+        }
+    }
+
+    if (!prepared.length || !isFinite(minLen)) {
+        document.body.removeChild(tempSvg);
+        return points;
+    }
+
+
+    // =========================
+    // 2) PASS #2: 실제 샘플링
+    // =========================
+    for (const item of prepared) {
+        const { dAttr, transformMatrix, length: totalLength } = item;
+
+        const pathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        pathEl.setAttribute("d", dAttr);
+
+        if (transformMatrix) {
+            const m = transformMatrix;
+            pathEl.setAttribute("transform", `matrix(${m.a},${m.b},${m.c},${m.d},${m.e},${m.f})`);
         }
 
-        const step = sampleStep > 0 ? sampleStep : totalLength / 50;
+        tempSvg.appendChild(pathEl);
+
+        let step;
+
+        if (typeof sampleStep === "number" && sampleStep > 0) {
+            step = sampleStep; // 고정 step
+        } else {
+            // 1) path 길이 기반 N등분
+            step = totalLength / Math.max(1, samplesPerPath);
+
+            // 2) 긴 path 너무 듬성 방지 (상한만)
+            step = Math.min(step, maxStepClamp);
+
+            // 3) 짧은 path에서 폭주 방지 (minStep 대신 샘플 수 상한)
+            const n = Math.ceil(totalLength / Math.max(step, 1e-9));
+            if (n > maxSamplesPerPath) {
+                step = totalLength / maxSamplesPerPath;
+            }
+        }
+
         const localPoints = [];
         let isFirst = true;
 
-        // 일정 단위로 샘플링
         for (let len = 0; len <= totalLength; len += step) {
             const pt = pathEl.getPointAtLength(len);
             localPoints.push({ x: pt.x, y: pt.y, pen: isFirst ? 0 : 1 });
             isFirst = false;
         }
 
-        // 끝점 추가
         const lastPt = pathEl.getPointAtLength(totalLength);
         localPoints.push({ x: lastPt.x, y: lastPt.y, pen: 1 });
 
         tempSvg.removeChild(pathEl);
-        if (!localPoints.length) return;
+        if (!localPoints.length) continue;
 
-        // 이전 shape의 끝점 → 이번 shape의 시작점 까지 펜 업 이동 (물리적으로 순간이동 방지)
+        // bridge (pen up)
         if (lastGlobalPt) {
             const start = lastGlobalPt;
             const end = localPoints[0];
@@ -915,26 +963,19 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
             const dy = end.y - start.y;
             const dist = Math.hypot(dx, dy);
 
-            const bridgeStep = sampleStep > 0 ? sampleStep : dist / 20;
+            const bridgeStep = step * bridgeScale;
             const bridgeCount = Math.max(1, Math.floor(dist / bridgeStep));
 
             for (let i = 1; i <= bridgeCount; i++) {
                 const t = i / (bridgeCount + 1);
-                points.push({
-                    x: start.x + dx * t,
-                    y: start.y + dy * t,
-                    pen: 0,
-                });
+                points.push({ x: start.x + dx * t, y: start.y + dy * t, pen: 0 });
             }
         }
 
-        // 실제 path 포인트 추가
-        for (const lp of localPoints) {
-            points.push(lp);
-        }
+        for (const lp of localPoints) points.push(lp);
 
         lastGlobalPt = localPoints[localPoints.length - 1];
-    });
+    }
 
     document.body.removeChild(tempSvg);
     return points;
