@@ -83,7 +83,7 @@ function dashboard() {
     .attr("font-size", "12px")
     .text("J1 / J2 Joint Angle Control");
 
- // === SVG Drag & Drop 안내 영역 ==========================================
+  // === SVG Drag & Drop 안내 영역 ==========================================
   frame.append("rect")
     .attr("x", 15)
     .attr("y", 15)
@@ -195,8 +195,8 @@ function dashboard() {
     // 재생 시작
     drawMode = 1; // drawMode는 sketch에 정의되어 있는 변수입니다.
     startJsonPlayback();
-    $("encoder.joint_1").d = currentAngleJoint1;
-    $("encoder.joint_2").d = currentAngleJoint2;
+    $("encoder.joint_1").d = degToStep(currentAngleJoint1);
+    $("encoder.joint_2").d = degToStep(currentAngleJoint2);
     console.log("SVG drawing mode activated");
   });
 
@@ -232,7 +232,7 @@ function dashboard() {
     drawMode = 3;
     $('pen').d = 0;
     startJsonPlayback();
-    bakeAllToTrailLayer(); 
+    bakeAllToTrailLayer();
     $("encoder.joint_1").d = currentAngleJoint1;
     $("encoder.joint_2").d = currentAngleJoint2;
     console.log("SVG drawing All mode activated");
@@ -320,18 +320,18 @@ function control() {
 
   // 2) 매 프레임마다 슬라이더 값 읽어서 angles[] 업데이트
   if (select("#angle_J1").node()) {
-    $("encoder.joint_1").d = parseInt(select("#angle_J1").property("value"));
+    $("encoder.joint_1").d = degToStep(parseFloat(select("#angle_J1").property("value")));
   }
   if (select("#angle_J2").node()) {
-    $("encoder.joint_2").d = parseInt(select("#angle_J2").property("value"));
+    $("encoder.joint_2").d = degToStep(parseFloat(select("#angle_J2").property("value")));
   }
 
   let lerpSpeed = 0.05; // 0~1, 클수록 빠름
   for (let i = 0; i < 2; i++) {
     angles[i] = angles[i] + (targetAngles[i] - angles[i]) * lerpSpeed;
   }
-  $("encoder.joint_1").d = Math.round(angles[0]);
-  $("encoder.joint_2").d = Math.round(angles[1]);
+  $("encoder.joint_1").d = degToStep(angles[0]);
+  $("encoder.joint_2").d = degToStep(angles[1]);
 }
 // === SVG 드래그 앤 드롭 처리 함수 ===
 function setupSvgDragDrop(popup_box_selection) {
@@ -494,6 +494,7 @@ function setupSvgDragDrop(popup_box_selection) {
   });
 }
 // === 플롯 TXT 다운로드 함수 (10진수 공백 구분) ===
+
 function downloadPlotTxtDecSpace(filename = "motion_plot.txt") {
   if (!plotto.plot || plotto.plot.length === 0) {
     alert("plot 비어있음 (plotEncode 먼저 수행됐는지 확인)");

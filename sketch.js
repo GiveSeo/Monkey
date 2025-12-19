@@ -98,15 +98,15 @@ function playJsonStep() {
   currentAngleJoint2 += normalizeAngle(deltaDeg2);
 
   // 관절 제한 클램프 (혹시라도 JSON이 범위 넘어가면 잘라줌)
-currentAngleJoint1 = Math.max(J1_MIN(), Math.min(J1_MAX(), currentAngleJoint1));
-currentAngleJoint2 = Math.max(J2_MIN(), Math.min(J2_MAX(), currentAngleJoint2));
+  currentAngleJoint1 = Math.max(J1_MIN(), Math.min(J1_MAX(), currentAngleJoint1));
+  currentAngleJoint2 = Math.max(J2_MIN(), Math.min(J2_MAX(), currentAngleJoint2));
 
   // 펜 상태 반영
   $('pen').d = cmd.pen;
 
   // 엔코더 값도 같이 업데이트
-  $("encoder.joint_1").d = currentAngleJoint1;
-  $("encoder.joint_2").d = currentAngleJoint2;
+  $("encoder.joint_1").d = degToStep(currentAngleJoint1);
+  $("encoder.joint_2").d = degToStep(currentAngleJoint2);
 
   jsonIndex++;
 }
@@ -127,8 +127,8 @@ function playJsonStepAndBake() {
   currentAngleJoint2 = Math.max(J2_MIN(), Math.min(J2_MAX(), currentAngleJoint2));
 
   $('pen').d = cmd.pen;
-  $("encoder.joint_1").d = currentAngleJoint1;
-  $("encoder.joint_2").d = currentAngleJoint2;
+  $("encoder.joint_1").d = degToStep(currentAngleJoint1);
+  $("encoder.joint_2").d = degToStep(currentAngleJoint2);
 
   jsonIndex++;
 
@@ -221,7 +221,7 @@ function bakeAllToTrailLayer() {
   }
 
   isPlaying = false;
-  drawMode = 0; 
+  drawMode = 0;
   $('pen').d = 0;
   prevPenState = 0;
   prevPenScreenX = null;
@@ -323,11 +323,11 @@ function drawSimulator(p) {
     // 자동 재생 끄기
     isPlaying = false;
     // 대시보드에서 조절한 엔코더 값을 현재 각도로 사용
-    const enc1 = $("encoder.joint_1").d;
-    const enc2 = $("encoder.joint_2").d;
+    const step1 = $("encoder.joint_1").d;
+    const step2 = $("encoder.joint_2").d;
 
-    currentAngleJoint1 = normalizeAngle(enc1);
-    currentAngleJoint2 = normalizeAngle(enc2);
+    currentAngleJoint1 = normalizeAngle(stepToDeg(step1));
+    currentAngleJoint2 = normalizeAngle(stepToDeg(step2));
   } else if (drawMode === 1) {
     // ---------- 자동 모드 ----------
     isPlaying = true;
@@ -355,13 +355,13 @@ function drawSimulator(p) {
     if (drawMode === 3) {
     }
     else if (drawMode === 1) {
-        playJsonStep();
+      playJsonStep();
     }
     else if (drawMode === 2) {
-        const start = performance.now();
-  while (performance.now() - start < 0.1) {
-    if (!playJsonStepAndBake()) break;
-  }
+      const start = performance.now();
+      while (performance.now() - start < 0.1) {
+        if (!playJsonStepAndBake()) break;
+      }
     }
   }
 
@@ -453,10 +453,13 @@ function drawSimulator(p) {
   p.textSize(12);
   p.text(`J1: ${currentAngleJoint1.toFixed(2)} deg`, 50, 50);
   p.text(`J2: ${currentAngleJoint2.toFixed(2)} deg`, 50, 70);
-  p.text(`L1: ${link1Length.toFixed(0)}px`, 50, 90);
-  p.text(`L2: ${link2Length.toFixed(0)}px`, 50, 110);
-  p.text(`Pen X: ${x3.toFixed(1)} px`, 50, 130);  
-  p.text(`Pen Y: ${y3.toFixed(1)} px`, 50, 150); 
+  const encStep1 = $("encoder.joint_1").d;
+  const encStep2 = $("encoder.joint_2").d;
+
+  p.text(`ENC1: ${encStep1} step`, 50, 90);
+  p.text(`ENC2: ${encStep2} step`, 50, 110);
+  p.text(`Pen X: ${x3.toFixed(1)} px`, 50, 130);
+  p.text(`Pen Y: ${y3.toFixed(1)} px`, 50, 150);
 
   p.text(isPlaying ? "Playing" : "Paused", 50, 170);
   p.text(`Pen: ${$('pen').d}`, 50, 190);
