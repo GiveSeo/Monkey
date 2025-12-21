@@ -347,6 +347,9 @@ function drawSimulator(p) {
         if (!playJsonStepAndBake()) break;
       }
     }
+    else if(drawMode === 3){
+      bakeAllToTrailLayer();
+    }
   }
 
   // 2) Forward Kinematics (현재 joint 각도로 포즈 계산)

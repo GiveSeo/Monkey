@@ -1,8 +1,4 @@
-// === J1 / J2 전용 대시보드 ===
 
-// 심플 슬라이더 생성기 (HTML range)
-
-// === 제어 로직 ===
 let init = false;
 // angles[0] = J1, angles[1] = J2
 let angles = [0, 0];
@@ -232,7 +228,6 @@ function dashboard() {
     drawMode = 3;
     $('pen').d = 0;
     startJsonPlayback();
-    bakeAllToTrailLayer();
     $("encoder.joint_1").d = currentAngleJoint1;
     $("encoder.joint_2").d = currentAngleJoint2;
     console.log("SVG drawing All mode activated");

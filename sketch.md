@@ -172,7 +172,120 @@ setupSimulator(p) 함수는 p5.js가 요구하는 setup 함수로, 시뮬레이�
 setupSimulator()는 시뮬레이터가 동작하기 위한 모든 초기 준비 작업을 수행합니다: 화면 구성, 리소스 로드, 기하계산, 전역상태 세팅, UI 동기화 등을 마치고, 마지막에 캔버스를 만들어놨으므로, 이후 자동으로 p5가 drawSimulator 함수를 매 프레임 호출하게 됩니다.
 
 ### drawSimulator(p)
+drawSimulator(p) 함수는 p5.js의 draw 루프 함수로, 화면을 지속적으로 업데이트하여 애니메이션과 상호작용을 처리합니다.
+이 함수는 매 프레임 호출되며, 내부에서 현재 모드와 상태에 따라 로봇 팔의 움직임과 그리기를 수행합니다.
 
 #### 실행 동작
 
+디버그 프레임 증가: 프레임마다 debugFrame 변수를 1 씩 증가시킵니다.
+모드에 따른 상태 설정 : drawMode에 따라 모드를 설정합니다.  
+drawMode가 1일 경우(수동 모드)
+```javascript
+const step1 = $("encoder.joint_1").d;
+const step2 = $("encoder.joint_2").d;
+currentAngleJoint1 = normalizeAngle(stepToDeg(step1));
+currentAngleJoint2 = normalizeAngle(stepToDeg(step2));
+```
+$("encoder.joint_1").d, $("encoder.joint_2").d 엔코더 값을 currentAngleJoint1/2에 대입합니다. 이로써 사용자 입력이 로봇팔 각도에 바로 반영됩니다(dashBoard에서 입력을 $("encoder.joint_1").d, $("encoder.joint_2").d에 대입합니다.)
 
+drawMode가 1이 아닐 경우(자동 모드)
+```javascript
+isPlaying = true;
+```
+isPlaying 변수를 true로 변경하여 자동모드 변수를 변경합니다.
+
+화면 초기화 : p.background(245)로 캔버스 전체를 밝은 회색 배경으로 체웁니다(이 때, 이전 프레임에 그린 로봇, 텍스트가 지워집니다.)
+```javascript
+if (trailLayer) { p.image(trailLayer, 0, 0); } // 이전 궤적 그리기
+```
+trailLayer가 존재하면, 그것을 현재 프레임에 그립니다.(trailLayer에는 그동안 펜으로 그린 궤적이 저장되어 있으므로, 이전에 그린 빨간 선 경로가 캔버스에 유지됩니다.)
+
+스케일 적용 : 
+```javascript
+p.scale(scale)
+```
+이후의 그리기 연산은 미리 정한 scale을 적용합니다.
+
+자동 모션 명령 처리(수동은 제외) : 
+```javascript
+ 	if (plotto.motionJson.length > 0) {
+    if (drawMode === 1) { ... }
+    else if (drawMode === 2) { ... }
+    else if (drawMode === 3) {...}
+}
+```
+drawMode 1일 경우, playJsonStep()을 호출하여 한 스텝만 처리합니다.
+drawMode 2일 경우, performance.now() 함수를 사용하여, 0.1밀리초(빠른 속도) 단위로 playJsonStepAndBake() 함수를 실행합니다. 이렇게 해서 한 프레임 내에 많은 스텝을 처리하여 빠른 그리기를 구현하였습니다.
+이 때에는 그리기는 한 프레임에 여러번 실행되고 로봇팔 이미지 랜더링은 한 프레임에 한번 실행되어, 실제적으로는 빠르게 그려지는 것으로 보이게 됩니다.
+drawMode 3일 경우, bakeAllToTrailLayer() 함수를 사용하여, motionJson를 while문을 통해 한번에 탐색하여 한번에 trailLayer에 그리기를 수행합니다.
+
+정기구학 계산 : 모드를 통해 정해진 currentAngleJoint1 / 2에 맞는 로봇 관절의 위치와 펜 위치를 계산합니다.
+
+관절 위치 계산 : 
+
+펜 위치 및 실시간 궤적 추가 : 
+penX, penY에 x3, y3의 펜 끝 좌표를 저장하여, scale 만큼을 곱한 penScreenX, penScreenY를 계산하고, prevPenState와 $('pen').d를 통해 궤적을 추가합니다. 이 궤적 추가는 수동 모드와, 자동모드 (drawMode === 1)에서 그리기를 보장하기 위함입니다.
+
+관절 범위 기록 : 
+```javascript
+  if (debugFrame > 5) {
+    minJoint1 = Math.min(minJoint1, currentAngleJoint1);
+    maxJoint1 = Math.max(maxJoint1, currentAngleJoint1);
+    minJoint2 = Math.min(minJoint2, currentAngleJoint2);
+    maxJoint2 = Math.max(maxJoint2, currentAngleJoint2);
+  }
+```
+debugFrame 5 이상일 시, currentAngleJoint 값에서 기록된 관절 범위를 기록합니다.
+디버그 텍스트 출력 : 
+```javascript
+  p.push(); p.fill(0); p.textSize(12); // 글자색을 검정, 크기를 12px로 설정하고 그래픽 상태 저장
+  p.text(`J1: ${currentAngleJoint1.toFixed(2)} deg`, 50, 50); // 현재 joint 1 각도(도 기준)
+  p.text(`J2: ${currentAngleJoint2.toFixed(2)} deg`, 50, 70); // 현재 joint 2 각도(도 기준)
+  const encStep1 = $("encoder.joint_1").d;
+  const encStep2 = $("encoder.joint_2").d;
+
+  p.text(`ENC1: ${encStep1} step`, 50, 90); // 현재 joint 1 각도(Step 기준)
+  p.text(`ENC2: ${encStep2} step`, 50, 110); // 현재 joint 2 각도(Step 기준)
+  p.text(`Pen X: ${x3.toFixed(1)} px`, 50, 130); // penX 좌표
+  p.text(`Pen Y: ${y3.toFixed(1)} px`, 50, 150); // penY 좌표
+
+  p.text(isPlaying ? "Playing" : "Paused", 50, 170); // Playing 여부(자동 / 수동 여부)
+  p.text(`Pen: ${$('pen').d}`, 50, 190); // pen이 1인지 0인지 표시
+  p.text(`MIN J1: ${minJoint1.toFixed(2)}`, 50, 290); // minJont1의 값(작동된 joint1각도 중 최소 값)
+  p.text(`MAX J1: ${maxJoint1.toFixed(2)}`, 50, 310); // maxJont1의 값(작동된 joint1각도 중 최대 값)
+  p.text(`MIN J2: ${minJoint2.toFixed(2)}`, 50, 330); // minJont2의 값(작동된 joint2각도 중 최소 값)
+  p.text(`MAX J2: ${maxJoint2.toFixed(2)}`, 50, 350); // maxJont2의 값(작동된 joint2각도 중 최대 값)
+  p.pop();
+```
+
+drawSimulator는 이와 같은 과정을 매 프레임 반복합니다. 수동 모드라면 사용자가 값을 설정할 때 마다 currentAngleJoint에 반영되어 그림이 움직이고, 자동 모드라면 motionJson을 따라 그림을 그립니다.
+
+## 동작 흐름 정리
+
+### 시뮬레이터 실행 시작
+sketch() 함수가 실행되고, 이 함수는 모달 팝업과 p5 인스턴스를 생성하여 setupSimulator과 drawSimulator를 연결합니다.
+
+### 초기 설정
+팝업창 / 캔버스 / 프레임 레이트 설정 및 이미지 리소스를 불러오고, spine으로부터 받은 이미지 좌표 데이터를 이용하여 링크 길이와 각도를 계산합니다.
+이후 로봇 베이스 위치를 결정하고 plotto 객체에 configure를 통해 각종 설정값을 전달합니다.
+또한 펜 궤적을 그릴 trailLayer를 생성한 뒤, p5 canvas를 생성하면 draw 루프가 실행됩니다.
+
+### 메인 루프 (drawSimulator)
+p5가 설정한 100fps를 목표로 drawSimulator를 계속 호출하면서 시뮬레이션이 진행됩니다. 각 프레임마다 현재 모드를 확인하고 수동 / 자동 모드 분기 처리를 진행합니다. 수동이면 입력값을 읽어 currentAngleJoint에 반영하고, 아닐 시 isPlaying 변수만 세팅합니다.
+
+이후 배경을 지우고, 이미 그려진 궤적(trailLayer)를 다시 그립니다.(이전 프레임에서 그린 궤적 유지를 위함.)
+
+자동모드 동작 실행 : 만약 자동모드 일 경우, drawMode 값에 따라 한 스텝씩 또는 여러 스텝을 빠르게 처리합니다. 이 과정에서 currentAngleJoint와 펜 상태 등이 갱신되고, (고속모드의 경우 동시에 선도 그려짐) jsonIndex가 진행됩니다.
+
+*** drawMode 1 일시 *** : drawSimulator가 매 프레임 playJsonStep()을 호출하여 한 스텝씩 진행하며 currentAngleJoint가 갱신됩니다.
+*** drawMode 2 일시 *** : drawSimulator가 한번 호출 될 때, 여러 스탭을 소비하며 궤적을 그립니다.
+*** drawMode 3 일시 *** : 내부에서 루프를 돌며(while) drawSimulator의 개입 없이, 즉시 trailLayer에 그림을 완성합니다.
+
+로봇팔 이미지 랜더링 : 계산된 각도와 좌표를 이용해, 상부팔, 하부팔, 베이스 이미지를 적절한 위치와 회전으로 그립니다. 
+
+펜 궤적 그리기 : 펜 끝 좌표를 이용하여, 펜이 내려져 있다고 판단 시(prevPenState, $('pen').d의 변수에 따름) trailLayer에 추가로 선을 그립니다.
+
+디버그 정보 업데이트 : 관절 각도의 min/max, 상태 텍스트 등 여러 텍스트를 출력합니다.
+
+## 결론
+sktech 부분은 spine에서 정의된 motionJson 정보를 바탕으로 로봇팔을 랜더링을 진행합니다.
