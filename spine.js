@@ -263,7 +263,12 @@ class Plotto {
         const maxDelta = opts.maxDeltaDeg ?? this.MAX_DELTA_DEG;
 
         // 1) SVG -> raw points
-        const rawPts = extractPathPointsFromSvg(svgText, sampleStep);
+        const rawPts = extractPathPointsFromSvg(svgText, {
+            samplesPerPath: 350,      // path 하나를 대략 200등분
+            maxSamplesPerPath: 4000,  // path 하나당 최대 점 개수
+            maxStepClamp: 2,          // 긴 path가 너무 듬성해지지 않게
+            bridgeScale: 1.0,         // path 사이 pen-up 이동 밀도
+        });
 
         // 2) raw -> 정규화 박스
         const ptsBox = normalizeToBox(rawPts);
@@ -439,14 +444,22 @@ function normalizeAngle(angle) {
     return angle;
 }
 // SVG 경로에서 포인트 추출 함수
-function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
+function extractPathPointsFromSvg(svgText, opts = {}) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(svgText, "image/svg+xml");
     const svgRoot = doc.documentElement;
 
+    const {
+        sampleStep = null,           // 숫자면 고정 step (px)
+        samplesPerPath = 200,        // path 하나를 대략 몇 등분 할지(길이/등분 = step)
+        maxStepClamp = 2,            // 긴 path가 너무 듬성해지는 걸 방지 (상한만)
+        maxSamplesPerPath = 3000,    // 짧은 path에서 폭주 방지 (minStep 대체)
+        bridgeScale = 1.0,           // shape 간 pen-up 이동 샘플링 밀도
+    } = opts;
+
     const points = [];
 
-    // 브라우저 임시 svg
+    // 브라우저 임시 svg (getTotalLength/getPointAtLength 용)
     const tempSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     tempSvg.setAttribute("width", "0");
     tempSvg.setAttribute("height", "0");
@@ -455,98 +468,28 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
     tempSvg.style.top = "-9999px";
     document.body.appendChild(tempSvg);
 
-    let lastGlobalPt = null; // 이전 shape의 마지막 점
+    let lastGlobalPt = null;
 
-    // transform 파싱 함수
-    function parseTransform(transformStr) {
-        if (!transformStr) return null;
-
-        // 단위행렬
-        let M = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
-
-        // 단일 변환 생성기
-        const I = () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
-
-        const T = (tx = 0, ty = 0) => ({ a: 1, b: 0, c: 0, d: 1, e: tx, f: ty });
-
-        const S = (sx = 1, sy = sx) => ({ a: sx, b: 0, c: 0, d: sy, e: 0, f: 0 });
-
-        const R = (deg = 0) => {
-            const rad = (deg * Math.PI) / 180;
-            const cos = Math.cos(rad);
-            const sin = Math.sin(rad);
-            return { a: cos, b: sin, c: -sin, d: cos, e: 0, f: 0 };
-        };
-
-        const KX = (deg = 0) => {
-            const rad = (deg * Math.PI) / 180;
-            return { a: 1, b: 0, c: Math.tan(rad), d: 1, e: 0, f: 0 };
-        };
-
-        const KY = (deg = 0) => {
-            const rad = (deg * Math.PI) / 180;
-            return { a: 1, b: Math.tan(rad), c: 0, d: 1, e: 0, f: 0 };
-        };
-
-        const toNums = (s) =>
-            s
-                .trim()
-                .split(/[\s,]+/)
-                .filter(Boolean)
-                .map(parseFloat);
-
-        // transform 함수들 추출: name(args)
-        const re = /([a-zA-Z]+)\(([^)]*)\)/g;
-        let match;
-
-        while ((match = re.exec(transformStr)) !== null) {
-            const name = match[1];
-            const args = toNums(match[2]);
-
-            let m = null;
-
-            if (name === "translate") {
-                const tx = args[0] ?? 0;
-                const ty = args[1] ?? 0;
-                m = T(tx, ty);
-            } else if (name === "scale") {
-                const sx = args[0] ?? 1;
-                const sy = args[1] ?? sx;
-                m = S(sx, sy);
-            } else if (name === "rotate") {
-                const ang = args[0] ?? 0;
-                const cx = args[1];
-                const cy = args[2];
-
-                if (typeof cx === "number" && typeof cy === "number") {
-                    // rotate(a cx cy) = T(cx,cy) * R(a) * T(-cx,-cy)
-                    m = multiplyMatrices(T(cx, cy), multiplyMatrices(R(ang), T(-cx, -cy)));
-                } else {
-                    m = R(ang);
-                }
-            } else if (name === "skewX") {
-                m = KX(args[0] ?? 0);
-            } else if (name === "skewY") {
-                m = KY(args[0] ?? 0);
-            } else if (name === "matrix") {
-                // matrix(a b c d e f)
-                if (args.length >= 6) {
-                    m = { a: args[0], b: args[1], c: args[2], d: args[3], e: args[4], f: args[5] };
-                } else {
-                    m = I();
-                }
-            } else {
-                // 알 수 없는 transform이면 무시
-                m = I();
-            }
-
-            // ⭐ SVG transform은 "작성된 순서대로 적용"되도록 누적:
-            // p' = m * p, 그 다음 변환이 또 있으면 (next * (m*p)) → 누적은 "앞에 곱하기"
-            M = multiplyMatrices(m, M);
-        }
-
-        return M;
-    }
+    // =========================
+    // Matrix utilities
+    // =========================
+    const I = () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
+    const T = (tx = 0, ty = 0) => ({ a: 1, b: 0, c: 0, d: 1, e: tx, f: ty });
+    const S = (sx = 1, sy = sx) => ({ a: sx, b: 0, c: 0, d: sy, e: 0, f: 0 });
+    const R = (deg = 0) => {
+        const rad = (deg * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        return { a: cos, b: sin, c: -sin, d: cos, e: 0, f: 0 };
+    };
+    const KX = (deg = 0) => {
+        const rad = (deg * Math.PI) / 180;
+        return { a: 1, b: 0, c: Math.tan(rad), d: 1, e: 0, f: 0 };
+    };
+    const KY = (deg = 0) => {
+        const rad = (deg * Math.PI) / 180;
+        return { a: 1, b: Math.tan(rad), c: 0, d: 1, e: 0, f: 0 };
+    };
 
     function multiplyMatrices(m1, m2) {
         if (!m1) return m2;
@@ -561,83 +504,121 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
         };
     }
 
-    function getAccumulatedTransform(el) {
+    // transform="translate(...) rotate(...) ..." 파서
+    function parseTransform(transformStr) {
+        if (!transformStr) return null;
+
+        let M = I();
+
+        const toNums = (s) =>
+            s
+                .trim()
+                .split(/[\s,]+/)
+                .filter(Boolean)
+                .map(parseFloat);
+
+        const re = /([a-zA-Z]+)\(([^)]*)\)/g;
+        let match;
+
+        while ((match = re.exec(transformStr)) !== null) {
+            const name = match[1];
+            const args = toNums(match[2]);
+
+            let m = I();
+
+            if (name === "translate") {
+                m = T(args[0] ?? 0, args[1] ?? 0);
+            } else if (name === "scale") {
+                const sx = args[0] ?? 1;
+                const sy = args[1] ?? sx;
+                m = S(sx, sy);
+            } else if (name === "rotate") {
+                const ang = args[0] ?? 0;
+                const cx = args[1];
+                const cy = args[2];
+                if (typeof cx === "number" && typeof cy === "number") {
+                    // rotate(a cx cy) = T(cx,cy) * R(a) * T(-cx,-cy)
+                    m = multiplyMatrices(T(cx, cy), multiplyMatrices(R(ang), T(-cx, -cy)));
+                } else {
+                    m = R(ang);
+                }
+            } else if (name === "skewX") {
+                m = KX(args[0] ?? 0);
+            } else if (name === "skewY") {
+                m = KY(args[0] ?? 0);
+            } else if (name === "matrix") {
+                if (args.length >= 6) {
+                    m = { a: args[0], b: args[1], c: args[2], d: args[3], e: args[4], f: args[5] };
+                }
+            }
+
+            // SVG transform은 "작성된 순서대로 적용" → 누적은 앞에 곱하기
+            M = multiplyMatrices(m, M);
+        }
+
+        return M;
+    }
+
+    // el 자신 포함, 부모로 올라가며 transform 누적
+    function getAccumulatedTransformInclusive(el) {
         let acc = null;
         let cur = el;
-
         while (cur && cur !== svgRoot) {
-            const tStr = cur.getAttribute("transform");
-            if (tStr) {
-                const m = parseTransform(tStr);
-                acc = multiplyMatrices(m, acc);
-            }
+            const tStr = cur.getAttribute && cur.getAttribute("transform");
+            if (tStr) acc = multiplyMatrices(parseTransform(tStr), acc);
             cur = cur.parentElement;
         }
         return acc;
     }
 
-    function applyTransform(x, y, m) {
-        if (!m) return { x, y };
-        return {
-            x: m.a * x + m.c * y + m.e,
-            y: m.b * x + m.d * y + m.f,
-        };
+    // el의 부모부터 올라가며 transform 누적 (el 자신 제외)
+    function getAccumulatedTransformParentsOnly(el) {
+        let acc = null;
+        let cur = el ? el.parentElement : null;
+        while (cur && cur !== svgRoot) {
+            const tStr = cur.getAttribute && cur.getAttribute("transform");
+            if (tStr) acc = multiplyMatrices(parseTransform(tStr), acc);
+            cur = cur.parentElement;
+        }
+        return acc;
     }
 
+    // =========================
+    // Visibility filter
+    // =========================
     function shouldRender(el) {
-        // defs 안에 있으면 그리지 않음
+        // defs 안이면 제외
         let parent = el.parentElement;
         while (parent) {
-            if (parent.tagName.toLowerCase() === "defs") return false;
+            if (parent.tagName && parent.tagName.toLowerCase() === "defs") return false;
             parent = parent.parentElement;
         }
-
         const display = el.getAttribute("display");
         const visibility = el.getAttribute("visibility");
         if (display === "none" || visibility === "hidden") return false;
-
         return true;
     }
 
-    // 기본 도형 좌표 추출 함수
-    function circleToPath(cx, cy, r, m) {
-        const center = applyTransform(cx, cy, m);
-        let newR = r;
-
-        if (m) {
-            const sx = Math.sqrt(m.a * m.a + m.b * m.b);
-            const sy = Math.sqrt(m.c * m.c + m.d * m.d);
-            newR = (r * (sx + sy)) / 2;
-        }
-
-        const x0 = center.x - newR;
-        const x1 = center.x + newR;
-        const y = center.y;
-
-        return `M ${x0},${y} A ${newR},${newR} 0 1,0 ${x1},${y} A ${newR},${newR} 0 1,0 ${x0},${y} Z`;
+    // =========================
+    // Local shape -> local path
+    // (⚠️ 여기서는 transform을 절대 적용하지 않는다)
+    // =========================
+    function circleToPathLocal(cx, cy, r) {
+        const x0 = cx - r;
+        const x1 = cx + r;
+        const y = cy;
+        return `M ${x0},${y} A ${r},${r} 0 1,1 ${x1},${y} A ${r},${r} 0 1,1 ${x0},${y} Z`;
     }
 
-    function ellipseToPath(cx, cy, rx, ry, m) {
-        const center = applyTransform(cx, cy, m);
-        let newRx = rx,
-            newRy = ry;
-
-        if (m) {
-            const sx = Math.sqrt(m.a * m.a + m.b * m.b);
-            const sy = Math.sqrt(m.c * m.c + m.d * m.d);
-            newRx = rx * sx;
-            newRy = ry * sy;
-        }
-
-        const x0 = center.x - newRx;
-        const x1 = center.x + newRx;
-        const y = center.y;
-
-        return `M ${x0},${y} A ${newRx},${newRy} 0 1,0 ${x1},${y} A ${newRx},${newRy} 0 1,0 ${x0},${y} Z`;
+    function ellipseToPathLocal(cx, cy, rx, ry) {
+        const x0 = cx - rx;
+        const x1 = cx + rx;
+        const y = cy;
+        // sweep-flag를 1로 변경 (반시계방향)
+        return `M ${x0},${y} A ${rx},${ry} 0 1,1 ${x1},${y} A ${rx},${ry} 0 1,1 ${x0},${y} Z`;
     }
 
-    function rectToPath(x, y, w, h, rx, ry, m) {
-        // SVG 스펙: rx/ry 하나만 주어지면 다른 하나는 동일
+    function rectToPathLocal(x, y, w, h, rx, ry) {
         if ((rx && !ry) || (ry && !rx)) {
             rx = rx || ry;
             ry = ry || rx;
@@ -645,71 +626,46 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
         rx = rx || 0;
         ry = ry || 0;
 
-        // rx/ry는 폭/높이의 절반을 넘을 수 없음
         rx = Math.min(rx, w / 2);
         ry = Math.min(ry, h / 2);
 
-        // 라운드 없는 경우: 직선 사각형
         if (rx <= 1e-9 || ry <= 1e-9) {
-            const p1 = applyTransform(x, y, m);
-            const p2 = applyTransform(x + w, y, m);
-            const p3 = applyTransform(x + w, y + h, m);
-            const p4 = applyTransform(x, y + h, m);
-            return `M ${p1.x},${p1.y} L ${p2.x},${p2.y} L ${p3.x},${p3.y} L ${p4.x},${p4.y} Z`;
+            const x0 = x, y0 = y;
+            const x1 = x + w, y1 = y + h;
+            return `M ${x0},${y0} L ${x1},${y0} L ${x1},${y1} L ${x0},${y1} Z`;
         }
 
-        // quarter-ellipse를 cubic bezier로 근사할 때 쓰는 상수
-        // kappa = 4/3 * tan(pi/8) ≈ 0.5522847498307936
         const K = 0.5522847498307936;
-
-        // 로컬 좌표계에서의 주요 점들
-        const x0 = x, y0 = y;
-        const x1 = x + w, y1 = y + h;
-
-        // 각 코너에서 베지어 제어점 이동량
         const ox = rx * K;
         const oy = ry * K;
 
-        // 변환 적용 헬퍼
-        const P = (px, py) => applyTransform(px, py, m);
+        const x0 = x, y0 = y;
+        const x1 = x + w, y1 = y + h;
 
-        // 라운드 사각형을 시계방향으로 구성
-        // 시작점: top edge의 좌측 라운드 끝 (x0+rx, y0)
-        const p0 = P(x0 + rx, y0);
+        const p0 = { x: x0 + rx, y: y0 };
+        const p1s = { x: x1 - rx, y: y0 };
 
-        // top edge 직선 끝: (x1-rx, y0)
-        const p1s = P(x1 - rx, y0);
+        const c1 = { x: x1 - rx + ox, y: y0 };
+        const c2 = { x: x1, y: y0 + ry - oy };
+        const p2e = { x: x1, y: y0 + ry };
 
-        // TR 코너(Top->Right) : (x1-rx,y0) -> (x1,y0+ry)
-        const c1 = P(x1 - rx + ox, y0);
-        const c2 = P(x1, y0 + ry - oy);
-        const p2e = P(x1, y0 + ry);
+        const p3s = { x: x1, y: y1 - ry };
 
-        // right edge 직선 끝: (x1, y1-ry)
-        const p3s = P(x1, y1 - ry);
+        const c3 = { x: x1, y: y1 - ry + oy };
+        const c4 = { x: x1 - rx + ox, y: y1 };
+        const p4e = { x: x1 - rx, y: y1 };
 
-        // BR 코너(Right->Bottom) : (x1,y1-ry) -> (x1-rx,y1)
-        const c3 = P(x1, y1 - ry + oy);
-        const c4 = P(x1 - rx + ox, y1);
-        const p4e = P(x1 - rx, y1);
+        const p5s = { x: x0 + rx, y: y1 };
 
-        // bottom edge 직선 끝: (x0+rx, y1)
-        const p5s = P(x0 + rx, y1);
+        const c5 = { x: x0 + rx - ox, y: y1 };
+        const c6 = { x: x0, y: y1 - ry + oy };
+        const p6e = { x: x0, y: y1 - ry };
 
-        // BL 코너(Bottom->Left) : (x0+rx,y1) -> (x0,y1-ry)
-        const c5 = P(x0 + rx - ox, y1);
-        const c6 = P(x0, y1 - ry + oy);
-        const p6e = P(x0, y1 - ry);
+        const p7s = { x: x0, y: y0 + ry };
 
-        // left edge 직선 끝: (x0, y0+ry)
-        const p7s = P(x0, y0 + ry);
+        const c7 = { x: x0, y: y0 + ry - oy };
+        const c8 = { x: x0 + rx - ox, y: y0 };
 
-        // TL 코너(Left->Top) : (x0,y0+ry) -> (x0+rx,y0)
-        const c7 = P(x0, y0 + ry - oy);
-        const c8 = P(x0 + rx - ox, y0);
-        const p8e = p0; // 닫힘점
-
-        // path 구성 (직선은 L, 코너는 C)
         return [
             `M ${p0.x},${p0.y}`,
             `L ${p1s.x},${p1s.y}`,
@@ -719,36 +675,35 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
             `L ${p5s.x},${p5s.y}`,
             `C ${c5.x},${c5.y} ${c6.x},${c6.y} ${p6e.x},${p6e.y}`,
             `L ${p7s.x},${p7s.y}`,
-            `C ${c7.x},${c7.y} ${c8.x},${c8.y} ${p8e.x},${p8e.y}`,
+            `C ${c7.x},${c7.y} ${c8.x},${c8.y} ${p0.x},${p0.y}`,
             "Z",
         ].join(" ");
     }
 
-    function lineToPath(x1, y1, x2, y2, m) {
-        const p1 = applyTransform(x1, y1, m);
-        const p2 = applyTransform(x2, y2, m);
-        return `M ${p1.x},${p1.y} L ${p2.x},${p2.y}`;
+    function lineToPathLocal(x1, y1, x2, y2) {
+        return `M ${x1},${y1} L ${x2},${y2}`;
     }
 
-    function polyToPath(pointsStr, m, close) {
+    function polyToPathLocal(pointsStr, close) {
         const coords = pointsStr
             .trim()
             .split(/[\s,]+/)
             .map(parseFloat);
+
         if (coords.length < 4) return "";
 
-        const p0 = applyTransform(coords[0], coords[1], m);
-        let path = `M ${p0.x},${p0.y}`;
-
+        let d = `M ${coords[0]},${coords[1]}`;
         for (let i = 2; i < coords.length; i += 2) {
-            const p = applyTransform(coords[i], coords[i + 1], m);
-            path += ` L ${p.x},${p.y}`;
+            d += ` L ${coords[i]},${coords[i + 1]}`;
         }
-        if (close) path += " Z";
-        return path;
+        if (close) d += " Z";
+        return d;
     }
 
-    // <use> 해석
+    // =========================
+    // <use> resolve (transform 올바르게 합성)
+    // final = parentAcc * useOwnTransform * T(x,y) * refTransform
+    // =========================
     function resolveUseElement(useEl) {
         const href = useEl.getAttribute("href") || useEl.getAttribute("xlink:href");
         if (!href) return null;
@@ -757,29 +712,25 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
         const ref = svgRoot.querySelector(`#${id}`);
         if (!ref) return null;
 
-        const tagName = ref.tagName.toLowerCase();
         const x = parseFloat(useEl.getAttribute("x")) || 0;
         const y = parseFloat(useEl.getAttribute("y")) || 0;
 
-        let m = getAccumulatedTransform(useEl);
-        if (x !== 0 || y !== 0) {
-            m = multiplyMatrices(m, { a: 1, b: 0, c: 0, d: 1, e: x, f: y });
-        }
+        const parentAcc = getAccumulatedTransformParentsOnly(useEl);
+        const useOwn = parseTransform(useEl.getAttribute("transform")) || null;
+        const refOwn = parseTransform(ref.getAttribute("transform")) || null;
 
-        const useTransform = useEl.getAttribute("transform");
-        if (useTransform) {
-            m = multiplyMatrices(m, parseTransform(useTransform));
-        }
+        let M = I();
+        if (refOwn) M = multiplyMatrices(refOwn, M);
+        if (x !== 0 || y !== 0) M = multiplyMatrices(T(x, y), M);
+        if (useOwn) M = multiplyMatrices(useOwn, M);
+        if (parentAcc) M = multiplyMatrices(parentAcc, M);
 
-        const refTransform = ref.getAttribute("transform");
-        if (refTransform) {
-            m = multiplyMatrices(m, parseTransform(refTransform));
-        }
-
-        return { element: ref, transform: m, tagName };
+        return { element: ref, transform: M, tagName: ref.tagName.toLowerCase() };
     }
 
-    // 실제로 그려질 요소 수집
+    // =========================
+    // Collect elements
+    // =========================
     const allElements = [];
 
     const directShapes = svgRoot.querySelectorAll(
@@ -789,7 +740,7 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
         if (!shouldRender(el)) return;
         allElements.push({
             element: el,
-            transform: null,
+            transform: getAccumulatedTransformInclusive(el),
             tagName: el.tagName.toLowerCase(),
         });
     });
@@ -807,30 +758,31 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
         return points;
     }
 
-    // 각 shape에 따라 처리
-    allElements.forEach((info) => {
+    // =========================
+    // PASS #1: build local d + transform + length
+    // =========================
+    const prepared = []; // { dAttr, transformMatrix, length }
+
+    for (const info of allElements) {
         const el = info.element;
         const tagName = info.tagName;
 
-        let transformMatrix = info.transform || getAccumulatedTransform(el);
+        let transformMatrix = info.transform || null;
         let dAttr = "";
 
         if (tagName === "path") {
-            dAttr = el.getAttribute("d");
-            // path는 transform을 svg에 맡기기 위해 matrix로 넘김
+            dAttr = el.getAttribute("d") || "";
         } else if (tagName === "circle") {
             const cx = parseFloat(el.getAttribute("cx")) || 0;
             const cy = parseFloat(el.getAttribute("cy")) || 0;
             const r = parseFloat(el.getAttribute("r")) || 0;
-            dAttr = circleToPath(cx, cy, r, transformMatrix);
-            transformMatrix = null; // 이미 좌표에 반영했으므로
+            dAttr = circleToPathLocal(cx, cy, r);
         } else if (tagName === "ellipse") {
             const cx = parseFloat(el.getAttribute("cx")) || 0;
             const cy = parseFloat(el.getAttribute("cy")) || 0;
             const rx = parseFloat(el.getAttribute("rx")) || 0;
             const ry = parseFloat(el.getAttribute("ry")) || 0;
-            dAttr = ellipseToPath(cx, cy, rx, ry, transformMatrix);
-            transformMatrix = null;
+            dAttr = ellipseToPathLocal(cx, cy, rx, ry);
         } else if (tagName === "rect") {
             const x = parseFloat(el.getAttribute("x")) || 0;
             const y = parseFloat(el.getAttribute("y")) || 0;
@@ -838,76 +790,100 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
             const h = parseFloat(el.getAttribute("height")) || 0;
             const rx = parseFloat(el.getAttribute("rx")) || 0;
             const ry = parseFloat(el.getAttribute("ry")) || 0;
-            dAttr = rectToPath(x, y, w, h, rx, ry, transformMatrix);
-            transformMatrix = null;
+            dAttr = rectToPathLocal(x, y, w, h, rx, ry);
         } else if (tagName === "line") {
             const x1 = parseFloat(el.getAttribute("x1")) || 0;
             const y1 = parseFloat(el.getAttribute("y1")) || 0;
             const x2 = parseFloat(el.getAttribute("x2")) || 0;
             const y2 = parseFloat(el.getAttribute("y2")) || 0;
-            dAttr = lineToPath(x1, y1, x2, y2, transformMatrix);
-            transformMatrix = null;
+            dAttr = lineToPathLocal(x1, y1, x2, y2);
         } else if (tagName === "polygon") {
             const pts = el.getAttribute("points");
-            if (pts) dAttr = polyToPath(pts, transformMatrix, true);
-            transformMatrix = null;
+            if (pts) dAttr = polyToPathLocal(pts, true);
         } else if (tagName === "polyline") {
             const pts = el.getAttribute("points");
-            if (pts) dAttr = polyToPath(pts, transformMatrix, false);
-            transformMatrix = null;
+            if (pts) dAttr = polyToPathLocal(pts, false);
         }
 
-        if (!dAttr) return;
+        if (!dAttr) continue;
 
-        const pathEl = document.createElementNS(
-            "http://www.w3.org/2000/svg",
-            "path"
-        );
+        const pathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
         pathEl.setAttribute("d", dAttr);
 
         if (transformMatrix) {
             const m = transformMatrix;
-            pathEl.setAttribute(
-                "transform",
-                `matrix(${m.a},${m.b},${m.c},${m.d},${m.e},${m.f})`
-            );
+            pathEl.setAttribute("transform", `matrix(${m.a},${m.b},${m.c},${m.d},${m.e},${m.f})`);
         }
 
         tempSvg.appendChild(pathEl);
 
-        let totalLength;
+        let L = 0;
         try {
-            totalLength = pathEl.getTotalLength();
+            L = pathEl.getTotalLength();
         } catch (e) {
-            console.warn("getTotalLength 실패, 이 shape는 스킵:", tagName, e);
             tempSvg.removeChild(pathEl);
-            return;
+            continue;
         }
 
-        if (!totalLength || totalLength === 0) {
-            tempSvg.removeChild(pathEl);
-            return;
+        tempSvg.removeChild(pathEl);
+
+        if (L > 0) {
+            prepared.push({ dAttr, transformMatrix, length: L });
+        }
+    }
+
+    if (!prepared.length) {
+        document.body.removeChild(tempSvg);
+        return points;
+    }
+
+    // =========================
+    // PASS #2: sampling
+    // =========================
+    for (const item of prepared) {
+        const { dAttr, transformMatrix, length: totalLength } = item;
+
+        const pathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        pathEl.setAttribute("d", dAttr);
+
+        if (transformMatrix) {
+            const m = transformMatrix;
+            pathEl.setAttribute("transform", `matrix(${m.a},${m.b},${m.c},${m.d},${m.e},${m.f})`);
         }
 
-        const step = sampleStep > 0 ? sampleStep : totalLength / 50;
+        tempSvg.appendChild(pathEl);
+
+        // ✅ 각 path마다 step 다르게: (길이 / samplesPerPath), min 없이 maxStep + maxSamples만
+        let step;
+        if (typeof sampleStep === "number" && sampleStep > 0) {
+            step = sampleStep;
+        } else {
+            step = totalLength / Math.max(1, samplesPerPath);
+            step = Math.min(step, maxStepClamp);
+
+            const n = Math.ceil(totalLength / Math.max(step, 1e-9));
+            if (n > maxSamplesPerPath) {
+                step = totalLength / maxSamplesPerPath;
+            }
+        }
+
         const localPoints = [];
         let isFirst = true;
 
-        // 일정 단위로 샘플링
         for (let len = 0; len <= totalLength; len += step) {
             const pt = pathEl.getPointAtLength(len);
             localPoints.push({ x: pt.x, y: pt.y, pen: isFirst ? 0 : 1 });
             isFirst = false;
         }
 
-        // 끝점 추가
+        // 끝점 보장
         const lastPt = pathEl.getPointAtLength(totalLength);
         localPoints.push({ x: lastPt.x, y: lastPt.y, pen: 1 });
 
         tempSvg.removeChild(pathEl);
-        if (!localPoints.length) return;
+        if (!localPoints.length) continue;
 
-        // 이전 shape의 끝점 → 이번 shape의 시작점 까지 펜 업 이동 (물리적으로 순간이동 방지)
+        // bridge (pen up)
         if (lastGlobalPt) {
             const start = lastGlobalPt;
             const end = localPoints[0];
@@ -915,8 +891,8 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
             const dy = end.y - start.y;
             const dist = Math.hypot(dx, dy);
 
-            const bridgeStep = sampleStep > 0 ? sampleStep : dist / 20;
-            const bridgeCount = Math.max(1, Math.floor(dist / bridgeStep));
+            const bridgeStep = step * bridgeScale;
+            const bridgeCount = Math.max(1, Math.floor(dist / Math.max(bridgeStep, 1e-9)));
 
             for (let i = 1; i <= bridgeCount; i++) {
                 const t = i / (bridgeCount + 1);
@@ -928,17 +904,14 @@ function extractPathPointsFromSvg(svgText, sampleStep = 0.02) {
             }
         }
 
-        // 실제 path 포인트 추가
-        for (const lp of localPoints) {
-            points.push(lp);
-        }
-
+        for (const lp of localPoints) points.push(lp);
         lastGlobalPt = localPoints[localPoints.length - 1];
-    });
+    }
 
     document.body.removeChild(tempSvg);
     return points;
 }
+
 
 // SVG 좌표계(0~SVG_BOX_SIZE)로 정규화 함수
 function normalizeToBox(points) {
