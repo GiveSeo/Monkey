@@ -305,7 +305,6 @@ function setupSimulator(p) {
   p.createCanvas(canvasWidth, canvasHeight);
 }
 
-
 //p5 draw 함수
 function drawSimulator(p) {
   debugFrame++;
