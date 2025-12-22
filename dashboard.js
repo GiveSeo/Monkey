@@ -1,8 +1,7 @@
-
+// 시스템 초기화 변수
 let init = false;
-// angles[0] = J1, angles[1] = J2
+
 let angles = [0, 0];
-// 모드 전환용 변수, false = SVG, true = Plotto FK 모드
 
 // 슬라이더가 지정하는 목표 각도
 let targetAngles = [0, 0];
