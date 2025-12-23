@@ -187,7 +187,7 @@ function playJsonStepAndBake() {
 
   jsonIndex++;
 
-  // 2) ✅ “이 스텝의 결과”를 trailLayer에 굽기
+  // 2) “이 스텝의 결과”를 trailLayer에 굽기
   if (!trailLayer) return true;
 
   const pos = plotto.fkPenXY_deg(currentAngleJoint1, currentAngleJoint2); // 전역 fk 사용
@@ -219,7 +219,7 @@ function bakeAllToTrailLayer() {
   if (bakedOnce) return;
   bakedOnce = true;
 
-  // ✅ playback 상태만 수동 리셋
+  // playback 상태만 수동 리셋
   jsonIndex = 0;
   currentAngleJoint1 = 0;
   currentAngleJoint2 = 0;
@@ -258,7 +258,7 @@ function bakeAllToTrailLayer() {
   $('pen').d = 0;
   prevPenState = 0;
   prevPenScreenX = null;
-  prevPenScreenY = null;  // ✅ 끝나면 수동 모드로
+  prevPenScreenY = null;  // 끝나면 수동 모드로
 }
 
 // p5 setup 함수
@@ -296,9 +296,6 @@ function setupSimulator(p) {
   // trailLayer 생성 (캔버스와 같은 크기, 투명 배경)
   trailLayer = p.createGraphics(canvasWidth, canvasHeight);
   trailLayer.clear();
-
-  // ✅ 여기서 SVG loadStrings(Spine 경로로 읽기) 제거
-  //    (드롭 이벤트에서 rebuildFromSvgText(svgText) 호출할 것)
 
   // 팝업, 캔버스 크기 조정
   w2custompopup.resize(canvasWidth + 16, canvasHeight + 96);
