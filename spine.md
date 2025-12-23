@@ -53,6 +53,20 @@ joint1, joint2 두 관절의 각도 제약을 나타냅니다. 로봇팔의 로�
 
 ## 주요 함수
 
+### inverseKinematics2DOF(targetX, targetY, prevJ1Deg, prevJ2Deg)
+
+이 함수는 목표 펜 좌표(targetX, targetY)를 주면, 해당 지점에 펜일 위치시키기 위한 두 관절 각도(joint1, joint2)를 계산합니다. 2DOF 평면 로봇 팔 표준 역기구학 공식을 구현하고 있으며, 기존 각도에 가까운 각도를 반환합니다.
+
+#### 실행 동작
+
+목표 점 까지 벡터 계산 및 작업 공간 체크 : 목표점까지 상대 좌표로 거리(d)를 계산하고,  | L1 - L2 | (최소 거리) ~ |L1 + L2| (최대 거리) 안에 있는지 검사합니다.
+
+역 기구학 각도 계산 : 목표점이 도달 가능 하다면, 삼각법을 이용해 팔꿈치 관절 각도(theta2)를 구합니다.
+
+구한 팔꿈치 각도는 절대값으로 두가지 경우가 있는데, 팔꿈치가 안쪽으로 굽힌 경우와, 바깥쪽으로 굽힌 경우입니다.
+
+각 후보에 대해 theta1 구하기 : 역기구학을 통해 어깨관절의 각도 theta1를 얻습니다.
+
 ### function extractPathPointsFromSvg(svgText, opts = {})
 extractPathPointsFromSvg(svgText, opts={}) 함수는 SVG 이미지 소스 (svgText)를 입력으로 받아, 그 안에 포함된 모든 도형(graphic element)들의 경로를 따라 일정 간격의 점들을 추출하고 이를 좌표 리스트로 반환하는 기능을 합니다. 
 
@@ -263,6 +277,24 @@ bridge 구간은 펜을 든 이동이므로, pen은 0으로 기록합니다.
 ]
 ```
 이 결과를 통해, 좌표 -> 로봇의 step 증분값 으로 바꾸는 처리를 거처, 로봇이 이용 가능한 명령으로 변경하게 됩니다.
+
+
+### buildMotionJsonFromSvg
+buildMotionJsonFromSvg함수는 svgPathPoint를 입력으로 받아, 로봇 팔 각 관절에 대한 세부 움직임 명령 리스트 motionJson을 생성합니다. 결과적으로 로봇팔이 처음 위치에서 시작하여 경로의 모든 점을 방문하고, 펜을 올리거나 내리는 동작까지 포함한 명령이 만들어집니다.
+
+#### 동작 흐름
+
+초기 설정 및 유효성 체크 : 함수가 호출되면 this.jsonBulit를 확인하여, plotto 객체에서 motionJson이 만들어졌는지를 확인합니다. 만든 적이 있다면 다시 만들지 않고 종료합니다.
+그런다음 plotto motionJson 리스트를 초기화하고, curStepJ1, curStepJ2(현재 관절 위치를 추적하는 변수)를 0으로 초기화합니다. 또한, ji ~ j2의 각도 최대최소 스탭을 나타내는 (j1MinStep 등) 변수도 스탭 단위로 각도 제한을 저장해둡니다.
+
+보조 함수 moveToTarget(targetJ1, targetJ2, penState)  : 이 내부 함수는 현재 관절 위치에서 목표 관절 위치(targetJ1, targetJ2)까지 펜 상태 penstate로 이동하는데 필요한 d1,d2 명령을 motionJson에 추가합니다.
+`totalDiff1 = targetJ1 - curStepJ1, totalDiff2 = targetJ2 - curStepJ2, maxDiff = max(|totalDiff1|, |totalDiff2|)` 식으로 구해서, 만약 maxDiff가 0이면 펜 상태가 바뀌지 않으면 motionJson에 추가하지 않고, pen 상태가 바뀌는 경우만 motionJson에 추가합니다.
+
+maxDiff가 0이 아니라면, 실제 움직임이 필요한 것이므로, 큰 움직임을 한번에 하지 않고 MAX_STEPS_PT 이하의 작은 단계로 쪼개어 여러 움직임으로 추가합니다.
+
+
+
+
 
 ## 동작 흐름 정리
 
