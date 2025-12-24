@@ -1,0 +1,53 @@
+flowchart TB
+ subgraph subGraph0[" "]
+        LoadRes["캔버스 / FPS 설정 및 이미지 리소스 로드"]
+        SetupSim((("setupSimulator 호출")))
+        CalcLinks["spine 데이터 기반<br>링크 길이 / 각도 계산"]
+        SetBase["로봇 베이스 위치 결정"]
+        PlottoConfig["plotto.configure 설정값 전달"]
+        CreateTrail["펜 궤적용 trailLayer 생성"]
+  end
+ subgraph subGraph1[" "]
+    direction TB
+        DrawSim{"drawSimulator 루프 시작"}
+        StartDrawLoop["p5 Canvas 생성<br>및 draw 루프 시작"]
+        CheckMode{"현재 모드 확인"}
+        ManualInput["입력값 읽기 및<br>currentAngleJoint 반영"]
+        SetAutoFlag["isPlaying 변수 설정"]
+        ClearAndRedraw["배경 지우기 및<br>기존 trailLayer 다시 그리기"]
+        IsAutoActive{"자동 모드 실행 중?"}
+        RenderArm["로봇팔 이미지 렌더링<br>(계산된 각도 / 좌표로 팔과 베이스 그리기)"]
+        CheckDrawMode{"drawMode 확인"}
+        Mode1Action["매 프레임 playJsonStep 1회 호출<br>(currentAngleJoint 갱신)"]
+        Mode2Action["매 프레임 playJsonStep 다회 호출<br>(상태 갱신 및 궤적 고속 그리기)"]
+        Mode3Action["내부 While 루프로 즉시 그리기<br>(drawSimulator 개입 없이 trailLayer 완성)"]
+        DrawPenTrail["펜 궤적 그리기<br>(펜 내려간 상태면 trailLayer에 선 추가)"]
+        UpdateDebug["디버그 정보 텍스트 업데이트"]
+  end
+    Start(["시뮬레이터 실행 시작"]) --> SketchExec["sketch 함수 실행"]
+    SketchExec --> CreateInstance["모달 팝업 및 p5 인스턴스 생성<br>(setup / draw 연결)"]
+    CreateInstance --> SetupSim
+    SetupSim --> LoadRes
+    LoadRes --> CalcLinks
+    CalcLinks --> SetBase
+    SetBase --> PlottoConfig
+    PlottoConfig --> CreateTrail
+    CreateTrail --> StartDrawLoop
+    StartDrawLoop --> DrawSim
+    DrawSim --> CheckMode
+    CheckMode -- 수동 모드 --> ManualInput
+    CheckMode -- 자동 모드 --> SetAutoFlag
+    ManualInput --> ClearAndRedraw
+    SetAutoFlag --> ClearAndRedraw
+    ClearAndRedraw --> IsAutoActive
+    IsAutoActive -- 아니오 --> RenderArm
+    IsAutoActive -- 예 --> CheckDrawMode
+    CheckDrawMode -- Mode 1 (Normal) --> Mode1Action
+    CheckDrawMode -- Mode 2 (Fast) --> Mode2Action
+    CheckDrawMode -- Mode 3 (Instant) --> Mode3Action
+    Mode1Action --> RenderArm
+    Mode2Action --> RenderArm
+    Mode3Action --> RenderArm
+    RenderArm --> DrawPenTrail
+    DrawPenTrail --> UpdateDebug
+    UpdateDebug --> DrawSim
