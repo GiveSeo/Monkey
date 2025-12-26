@@ -257,15 +257,16 @@ class Plotto {
     }
     buildFromSvgText(svgText, opts = {}) {
         // opts로 튜닝 가능하게
+        const sampleStep = opts.sampleStep ?? 0.001;      // extract 샘플링 간격
         const k = opts.k ?? 1.0;                 // SVG_BOX -> 로봇 공간 스케일
         const flipY = opts.flipY ?? false;
         const maxDelta = opts.maxDeltaDeg ?? this.MAX_DELTA_DEG;
 
         // 1) SVG -> raw points
         const rawPts = extractPathPointsFromSvg(svgText, {
-            samplesPerPath: 350,      // path 하나를 대략 350 등분
+            samplesPerPath: 350,      // path 하나를 대략 200등분
             maxSamplesPerPath: 4000,  // path 하나당 최대 점 개수
-            maxStepClamp: 2,          // 긴 path가 너무 듬성해지지 않게(최대 px 단위)
+            maxStepClamp: 2,          // 긴 path가 너무 듬성해지지 않게
             bridgeScale: 1.0,         // path 사이 pen-up 이동 밀도
         });
 

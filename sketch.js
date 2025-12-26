@@ -7,13 +7,11 @@ function sketch() {
   }, "p5-canvas");
 }
 
-
 // 그리기 모드 관련 변수
 let drawMode = 0;
-let bakedOnce = false; 
+let bakedOnce = false;
 
 let jsonIndex = 0;
-
 
 const JOINT2_OFFSET = 143; // joint2가 0도일 때, 팔이 ㄷ자 모양이 되도록 오프셋 각도
 
@@ -42,11 +40,18 @@ let maxJoint2 = -1e9;
 const scale = 0.7; // 전체 캔버스 스케일
 const moreHeight = 100;
 
-function J1_MIN() { return plotto.minJoint1; }
-function J1_MAX() { return plotto.maxJoint1; }
-function J2_MIN() { return plotto.minJoint2; }
-function J2_MAX() { return plotto.maxJoint2; }
-
+function J1_MIN() {
+  return plotto.minJoint1;
+}
+function J1_MAX() {
+  return plotto.maxJoint1;
+}
+function J2_MIN() {
+  return plotto.minJoint2;
+}
+function J2_MAX() {
+  return plotto.maxJoint2;
+}
 
 // 재생 관련 상태
 let isPlaying = false;
@@ -123,8 +128,8 @@ function startJsonPlayback(jsonData) {
   // 초기화: 홈에서 시작한다고 가정 (필요하면 홈 각도로 바꾸기)
   currentAngleJoint1 = 0;
   currentAngleJoint2 = 0;
-  $('pen').d = 0;
-
+  $("pen").d = 0;
+  // 이전 프레임 정보 초기화
   prevPenScreenX = null;
   prevPenScreenY = null;
   prevPenState = 0;
@@ -151,16 +156,22 @@ function playJsonStep() {
   currentAngleJoint2 += normalizeAngle(deltaDeg2);
 
   // 관절 제한 클램프 (범위 넘어가면 자르기)
-  currentAngleJoint1 = Math.max(J1_MIN(), Math.min(J1_MAX(), currentAngleJoint1));
-  currentAngleJoint2 = Math.max(J2_MIN(), Math.min(J2_MAX(), currentAngleJoint2));
+  currentAngleJoint1 = Math.max(
+    J1_MIN(),
+    Math.min(J1_MAX(), currentAngleJoint1)
+  );
+  currentAngleJoint2 = Math.max(
+    J2_MIN(),
+    Math.min(J2_MAX(), currentAngleJoint2)
+  );
 
   // 펜 상태 반영
-  $('pen').d = cmd.pen;
+  $("pen").d = cmd.pen;
 
   // 엔코더 값도 같이 업데이트
   $("encoder.joint_1").d = degToStep(currentAngleJoint1);
   $("encoder.joint_2").d = degToStep(currentAngleJoint2);
-  
+
   //각도 처리 후 index ++
   jsonIndex++;
 }
@@ -169,7 +180,7 @@ function playJsonStep() {
 function playJsonStepAndBake() {
   if (jsonIndex >= plotto.motionJson.length) return false;
 
-  // 1) 한 스텝 진행 (기존 playJsonStep 내용)
+  // 한 스텝 진행 (기존 playJsonStep 내용)
   const cmd = plotto.motionJson[jsonIndex];
 
   const deltaDeg1 = cmd.d1 * plotto.STEP_DEG;
@@ -178,19 +189,25 @@ function playJsonStepAndBake() {
   currentAngleJoint1 += normalizeAngle(deltaDeg1);
   currentAngleJoint2 += normalizeAngle(deltaDeg2);
 
-  currentAngleJoint1 = Math.max(J1_MIN(), Math.min(J1_MAX(), currentAngleJoint1));
-  currentAngleJoint2 = Math.max(J2_MIN(), Math.min(J2_MAX(), currentAngleJoint2));
+  currentAngleJoint1 = Math.max(
+    J1_MIN(),
+    Math.min(J1_MAX(), currentAngleJoint1)
+  );
+  currentAngleJoint2 = Math.max(
+    J2_MIN(),
+    Math.min(J2_MAX(), currentAngleJoint2)
+  );
 
-  $('pen').d = cmd.pen;
+  $("pen").d = cmd.pen;
   $("encoder.joint_1").d = degToStep(currentAngleJoint1);
   $("encoder.joint_2").d = degToStep(currentAngleJoint2);
 
   jsonIndex++;
 
-  // 2) “이 스텝의 결과”를 trailLayer에 굽기
+  // “이 스텝의 결과”를 trailLayer에 적용하기
   if (!trailLayer) return true;
 
-  const pos = plotto.fkPenXY_deg(currentAngleJoint1, currentAngleJoint2); // 전역 fk 사용
+  const pos = plotto.fkPenXY_deg(currentAngleJoint1, currentAngleJoint2); // plotto fk 사용
   const penScreenX = pos.x * scale;
   const penScreenY = pos.y * scale;
 
@@ -198,7 +215,7 @@ function playJsonStepAndBake() {
     prevPenScreenX !== null &&
     prevPenScreenY !== null &&
     prevPenState === 1 &&
-    $('pen').d === 1
+    $("pen").d === 1
   ) {
     trailLayer.push();
     trailLayer.stroke(255, 0, 0);
@@ -210,7 +227,7 @@ function playJsonStepAndBake() {
 
   prevPenScreenX = penScreenX;
   prevPenScreenY = penScreenY;
-  prevPenState = $('pen').d;
+  prevPenState = $("pen").d;
 
   return true;
 }
@@ -219,11 +236,11 @@ function bakeAllToTrailLayer() {
   if (bakedOnce) return;
   bakedOnce = true;
 
-  // playback 상태만 수동 리셋
+  // 재생상태 초기
   jsonIndex = 0;
   currentAngleJoint1 = 0;
   currentAngleJoint2 = 0;
-  $('pen').d = 0;
+  $("pen").d = 0;
 
   prevPenScreenX = null;
   prevPenScreenY = null;
@@ -231,7 +248,9 @@ function bakeAllToTrailLayer() {
 
   if (trailLayer) trailLayer.clear();
 
-  let prevX = null, prevY = null, prevPen = 0;
+  let prevX = null,
+    prevY = null,
+    prevPen = 0;
 
   while (jsonIndex < plotto.motionJson.length) {
     playJsonStep();
@@ -240,7 +259,7 @@ function bakeAllToTrailLayer() {
     const x = pos.x * scale;
     const y = pos.y * scale;
 
-    if (prevX !== null && prevY !== null && prevPen === 1 && $('pen').d === 1) {
+    if (prevX !== null && prevY !== null && prevPen === 1 && $("pen").d === 1) {
       trailLayer.push();
       trailLayer.stroke(255, 0, 0);
       trailLayer.strokeWeight(2);
@@ -250,40 +269,37 @@ function bakeAllToTrailLayer() {
 
     prevX = x;
     prevY = y;
-    prevPen = $('pen').d;
+    prevPen = $("pen").d;
   }
-
+  // 끝나면 수동 모드
   isPlaying = false;
   drawMode = 0;
-  $('pen').d = 0;
+  $("pen").d = 0;
   prevPenState = 0;
   prevPenScreenX = null;
-  prevPenScreenY = null;  // 끝나면 수동 모드로
+  prevPenScreenY = null; 
 }
 
 // p5 setup 함수
 function setupSimulator(p) {
+  // 캔버스 크기 설정
   canvasWidth = 1200 * scale + 400;
   canvasHeight = 800 * scale + moreHeight;
 
   p.frameRate(100);
 
-  // Spine에서 이미지 경로 얻기 / 역방향 이미지
+  // Spine에서 이미지 리소스 / 경로 가져오기
   topPath = spine.images.get("top_reverse.png");
   upperPath = spine.images.get("upperarm_reverse.png");
   forePath = spine.images.get("forearm_reverse.png");
-
-  // p5 이미지 로딩
   imgTop = p.loadImage(topPath);
   imgUpper = p.loadImage(upperPath);
   imgFore = p.loadImage(forePath);
 
-  // 링크 길이 및 기본 각도 계산
+  // 링크 길이 및 기본 각도 계산 / 베이스 위치 계산
   initLinkGeometry();
-
-  // 베이스 위치 계산
   initBasePosition();
-
+  // plotto 초기 값 설정
   plotto.configure({
     baseX,
     baseY,
@@ -293,7 +309,7 @@ function setupSimulator(p) {
     foreRestAngle,
     JOINT2_OFFSET,
   });
-  // trailLayer 생성 (캔버스와 같은 크기, 투명 배경)
+  // 펜 궤적 레이어 설정
   trailLayer = p.createGraphics(canvasWidth, canvasHeight);
   trailLayer.clear();
 
@@ -305,7 +321,6 @@ function setupSimulator(p) {
 //p5 draw 함수
 function drawSimulator(p) {
   debugFrame++;
-
 
   if (drawMode === 0) {
     // ---------- 수동 모드 ----------
@@ -336,15 +351,13 @@ function drawSimulator(p) {
   if (plotto.motionJson.length > 0) {
     if (drawMode === 1) {
       playJsonStep();
-    }
-    else if (drawMode === 2) {
+    } else if (drawMode === 2) {
       const start = performance.now();
       //1 프레임 안에서 playJsonStepAndBake()를 0.1ms당 한번 실행함
       while (performance.now() - start < 0.1) {
         if (!playJsonStepAndBake()) break;
       }
-    }
-    else if(drawMode === 3){
+    } else if (drawMode === 3) {
       bakeAllToTrailLayer();
     }
   }
@@ -396,7 +409,7 @@ function drawSimulator(p) {
     p.pop();
   }
 
-  // 6) 펜 위치 & 궤적 trailLayer에 '굽기'
+  // 펜 위치 및 실시간 궤적 추가
   const penX = x3;
   const penY = y3;
 
@@ -408,7 +421,7 @@ function drawSimulator(p) {
       prevPenScreenX !== null &&
       prevPenScreenY !== null &&
       prevPenState === 1 &&
-      $('pen').d === 1
+      $("pen").d === 1
     ) {
       trailLayer.push();
       trailLayer.stroke(255, 0, 0);
@@ -420,10 +433,10 @@ function drawSimulator(p) {
 
     prevPenScreenX = penScreenX;
     prevPenScreenY = penScreenY;
-    prevPenState = $('pen').d;
+    prevPenState = $("pen").d;
   }
 
-  // 7) 관절 범위 기록
+  // 관절 범위 기록
   if (debugFrame > 5) {
     minJoint1 = Math.min(minJoint1, currentAngleJoint1);
     maxJoint1 = Math.max(maxJoint1, currentAngleJoint1);
@@ -431,7 +444,7 @@ function drawSimulator(p) {
     maxJoint2 = Math.max(maxJoint2, currentAngleJoint2);
   }
 
-  // 8) 디버그 텍스트
+  // 디버그 텍스트 출력
   p.push();
   p.fill(0);
   p.textSize(12);
@@ -446,7 +459,7 @@ function drawSimulator(p) {
   p.text(`Pen Y: ${y3.toFixed(1)} px`, 50, 150);
 
   p.text(isPlaying ? "Playing" : "Paused", 50, 170);
-  p.text(`Pen: ${$('pen').d}`, 50, 190);
+  p.text(`Pen: ${$("pen").d}`, 50, 190);
   p.text(`MIN J1: ${minJoint1.toFixed(2)}`, 50, 290);
   p.text(`MAX J1: ${maxJoint1.toFixed(2)}`, 50, 310);
   p.text(`MIN J2: ${minJoint2.toFixed(2)}`, 50, 330);
