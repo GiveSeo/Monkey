@@ -594,7 +594,7 @@ function extractPathPointsFromSvg(svgText, opts = {}) {
         return true;
     }
 
-    // ✅ path d 안에서 subpath(M/m) 단위로 분해
+    // path d 안에서 subpath(M/m) 단위로 분해
     function splitSubpaths(dAttr) {
         const d = (dAttr ?? "").trim();
         if (!d) return [];
@@ -618,7 +618,7 @@ function extractPathPointsFromSvg(svgText, opts = {}) {
     }
 
     function ellipseToPathLocal(cx, cy, rx, ry, rotation = 0) {
-        const K = 0.5522847498307936;
+        const K = 0.5522847498307936; // 베지어 근사 사용 카파 상수
 
         const ox = rx * K;
         const oy = ry * K;
@@ -666,14 +666,14 @@ function extractPathPointsFromSvg(svgText, opts = {}) {
 
         rx = Math.min(rx, w / 2);
         ry = Math.min(ry, h / 2);
-
+        // 모서리가 직각일 경우
         if (rx <= 1e-9 || ry <= 1e-9) {
             const x0 = x, y0 = y;
             const x1 = x + w, y1 = y + h;
             return `M ${x0},${y0} L ${x1},${y0} L ${x1},${y1} L ${x0},${y1} Z`;
         }
 
-        const K = 0.5522847498307936;
+        const K = 0.5522847498307936; // 베지어 근사 사용 카파 상수
         const ox = rx * K;
         const oy = ry * K;
 
@@ -778,7 +778,7 @@ function extractPathPointsFromSvg(svgText, opts = {}) {
             tagName: el.tagName.toLowerCase(),
         });
     });
-
+    // use 요소 추가
     const useElements = svgRoot.querySelectorAll("use");
     useElements.forEach((useEl) => {
         if (!shouldRender(useEl)) return;
@@ -792,9 +792,7 @@ function extractPathPointsFromSvg(svgText, opts = {}) {
         return points;
     }
 
-    // =========================
-    // PASS #1: build local d(+subpaths) + transform + length
-    // =========================
+    // 경로 길이 계산
     const prepared = []; // { dAttr, transformMatrix, length }
 
     for (const info of allElements) {
@@ -803,7 +801,7 @@ function extractPathPointsFromSvg(svgText, opts = {}) {
 
         const transformMatrix = info.transform || null;
 
-        // ✅ 여기서 "하나의 요소"에서 "여러 subpath d"를 만들어서 각각 prepared에 넣는다
+        // 여기서 "하나의 요소"에서 "여러 subpath d"를 만들어서 각각 prepared에 넣는다
         let dList = [];
 
         if (tagName === "path") {
@@ -854,7 +852,7 @@ function extractPathPointsFromSvg(svgText, opts = {}) {
 
         if (!dList.length) continue;
 
-        // ✅ subpath별로 길이 측정해서 prepared에 넣기
+        // subpath별로 길이 측정해서 prepared에 넣기
         for (const dAttr of dList) {
             if (!dAttr) continue;
 
@@ -889,9 +887,7 @@ function extractPathPointsFromSvg(svgText, opts = {}) {
         return points;
     }
 
-    // =========================
-    // PASS #2: sampling
-    // =========================
+    // 점 샘플링
     for (const item of prepared) {
         const { dAttr, transformMatrix, length: totalLength } = item;
 
