@@ -55,6 +55,16 @@ joint1, joint2 두 관절의 각도 제약을 나타냅니다. 로봇팔의 로�
 
 ### function extractPathPointsFromSvg(svgText, opts = {})
 
+extractPathPointsFromSvg(svgText, opts={}) 함수는 SVG 이미지 소스 (svgText)를 입력으로 받아, 그 안에 포함된 모든 도형(graphic element)들의 경로를 따라 일정 간격의 점들을 추출하고 이를 좌표 리스트로 반환하는 기능을 합니다. 
+
+#### 입력 매개 변수
+
+
+#### 실행 동작
+
+
+
+
 ## 동작 흐름 정리
 
 ## 결론
