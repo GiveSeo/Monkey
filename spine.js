@@ -29,7 +29,7 @@ class Plotto {
     #foreRestAngle = 0;
     #JOINT2_OFFSET = 143;
     #jsonBuilt = false;
-    #STEP_DEG = 0.010986328;
+    #STEP_DEG = (11.25 / 64) / 16;
     #MAX_STEPS_PT = 7;
     #MAX_DELTA_DEG = this.#STEP_DEG * this.#MAX_STEPS_PT;
     #SVG_BOX_SIZE = 250;
@@ -595,18 +595,199 @@ function extractPathPointsFromSvg(svgText, opts = {}) {
     }
 
     // path d 안에서 subpath(M/m) 단위로 분해
-    function splitSubpaths(dAttr) {
+
+    function splitSubpathsFixed(dAttr) {
         const d = (dAttr ?? "").trim();
         if (!d) return [];
 
-        // lookahead로 M/m 시작점 기준 split (공백/줄바꿈/바로붙음 모두 처리)
-        const parts = d.split(/(?=[Mm])/).map(s => s.trim()).filter(Boolean);
+        // 1) 토큰화: 명령문자 or 숫자
+        // - e/E 지수 표기 포함
+        const tokens = d.match(/[a-zA-Z]|[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?/g);
+        if (!tokens) return [];
 
-        // 혹시 M/m로 시작하지 않는 이상 케이스 방어(거의 없음)
-        if (parts.length === 1 && !/^[Mm]/.test(parts[0])) return [d];
+        // 각 커맨드별 파라미터 개수
+        // (한 세트 기준. M은 (x,y) 한쌍이 한 세트)
+        const PARAMS = {
+            M: 2, m: 2,
+            L: 2, l: 2,
+            H: 1, h: 1,
+            V: 1, v: 1,
+            C: 6, c: 6,
+            S: 4, s: 4,
+            Q: 4, q: 4,
+            T: 2, t: 2,
+            A: 7, a: 7,
+            Z: 0, z: 0,
+        };
 
-        // 각 조각은 반드시 M/m로 시작해야 subpath 의미가 명확
-        return parts.filter(p => /^[Mm]/.test(p));
+        const isCmd = (t) => /^[a-zA-Z]$/.test(t);
+
+        // 현재점/서브패스 시작점
+        let cx = 0, cy = 0;
+        let sx = 0, sy = 0; // subpath start (Z 처리용)
+
+        // 결과 subpath 문자열 버퍼들
+        const out = [];
+        let buf = "";
+
+        // "현재 서브패스가 존재하는지" 플래그
+        let hasSubpath = false;
+
+        // 마지막 명령 (숫자만 연속될 때 암묵적 반복용)
+        let lastCmd = null;
+
+        // 토큰 인덱스
+        let i = 0;
+
+        // 버퍼를 out으로 밀어넣기
+        const flush = () => {
+            const s = buf.trim();
+            if (s) out.push(s);
+            buf = "";
+            hasSubpath = false;
+        };
+
+        // 숫자 n개 읽기
+        const readNums = (n) => {
+            const arr = [];
+            for (let k = 0; k < n; k++) {
+                if (i >= tokens.length) return null;
+                const t = tokens[i++];
+                if (isCmd(t)) return null;
+                arr.push(parseFloat(t));
+            }
+            return arr;
+        };
+
+        // 버퍼에 커맨드+숫자들 추가(보기 좋게)
+        const emit = (cmd, nums) => {
+            if (cmd) buf += (buf ? " " : "") + cmd;
+            if (nums && nums.length) buf += " " + nums.join(" ");
+        };
+
+        while (i < tokens.length) {
+            let cmd = tokens[i];
+
+            if (isCmd(cmd)) {
+                i++;
+                lastCmd = cmd;
+            } else {
+                // 명령문자 없이 숫자만 나오면, 직전 명령 반복
+                if (!lastCmd) break;
+                cmd = lastCmd;
+            }
+
+            if (!(cmd in PARAMS)) {
+                // 알 수 없는 커맨드는 포기
+                break;
+            }
+
+            // Z/z 는 파라미터 없음
+            if (cmd === "Z" || cmd === "z") {
+                if (!hasSubpath) {
+                    // 서브패스 없이 Z가 나오면 무시
+                    continue;
+                }
+                emit("Z");
+                // Z 후 현재점은 서브패스 시작점으로 돌아감
+                cx = sx; cy = sy;
+                continue;
+            }
+
+            const need = PARAMS[cmd];
+
+            // M/m 특별 규칙: "첫 (x,y)"는 moveto, 이후 추가 (x,y)는 lineto 취급
+            if (cmd === "M" || cmd === "m") {
+                // 최소 한 세트는 있어야 함
+                const first = readNums(2);
+                if (!first) break;
+
+                // 새 moveto를 만난 순간: 기존 서브패스가 있으면 flush 후 새로 시작
+                if (hasSubpath) flush();
+
+                // --- 여기서가 핵심: m이면 현재점 기준으로 절대좌표로 바꿔서 'M'으로 내보냄 ---
+                let mx, my;
+                if (cmd === "m") {
+                    mx = cx + first[0];
+                    my = cy + first[1];
+                } else {
+                    mx = first[0];
+                    my = first[1];
+                }
+
+                emit("M", [mx, my]);
+                hasSubpath = true;
+
+                // current/subpath start 갱신
+                cx = mx; cy = my;
+                sx = mx; sy = my;
+
+                // moveto 뒤에 좌표쌍이 더 이어지면, 이는 lineto로 간주
+                // - 원본이 m이면 이후는 상대 lineto(l)
+                // - 원본이 M이면 이후는 절대 lineto(L)
+                const lineCmd = (cmd === "m") ? "l" : "L";
+
+                // 다음 토큰이 숫자면 (x,y) 계속 읽기
+                while (i < tokens.length && !isCmd(tokens[i])) {
+                    const pair = readNums(2);
+                    if (!pair) break;
+
+                    emit(lineCmd, pair);
+
+                    // current 업데이트 (lineto 규칙)
+                    if (lineCmd === "l") {
+                        cx += pair[0];
+                        cy += pair[1];
+                    } else {
+                        cx = pair[0];
+                        cy = pair[1];
+                    }
+                }
+
+                continue;
+            }
+
+            // 나머지 커맨드들은 "같은 cmd를 여러 세트 반복" 가능
+            // 예: L x y x y x y ...
+            // 세트 단위로 읽어서 내보내고 current만 업데이트해주면 됨
+            while (true) {
+                const nums = readNums(need);
+                if (!nums) break;
+
+                // 커맨드 출력
+                emit(cmd, nums);
+
+                // current 업데이트(끝점만 추적하면 됨)
+                switch (cmd) {
+                    case "L": cx = nums[0]; cy = nums[1]; break;
+                    case "l": cx += nums[0]; cy += nums[1]; break;
+                    case "H": cx = nums[0]; break;
+                    case "h": cx += nums[0]; break;
+                    case "V": cy = nums[0]; break;
+                    case "v": cy += nums[0]; break;
+                    case "C": cx = nums[4]; cy = nums[5]; break;
+                    case "c": cx += nums[4]; cy += nums[5]; break;
+                    case "S": cx = nums[2]; cy = nums[3]; break;
+                    case "s": cx += nums[2]; cy += nums[3]; break;
+                    case "Q": cx = nums[2]; cy = nums[3]; break;
+                    case "q": cx += nums[2]; cy += nums[3]; break;
+                    case "T": cx = nums[0]; cy = nums[1]; break;
+                    case "t": cx += nums[0]; cy += nums[1]; break;
+                    case "A": cx = nums[5]; cy = nums[6]; break;
+                    case "a": cx += nums[5]; cy += nums[6]; break;
+                }
+
+                hasSubpath = true;
+
+                // 다음 토큰이 숫자가 아니면(=명령이거나 끝) 이 커맨드 반복 종료
+                if (i >= tokens.length || isCmd(tokens[i])) break;
+            }
+        }
+
+        // 마지막 버퍼 flush
+        flush();
+
+        return out;
     }
 
     // Local shape -> local path
@@ -806,7 +987,7 @@ function extractPathPointsFromSvg(svgText, opts = {}) {
 
         if (tagName === "path") {
             const dAttr = el.getAttribute("d") || "";
-            dList = splitSubpaths(dAttr);
+            dList = splitSubpathsFixed(dAttr);
 
             // split이 비었으면(이상 케이스) 원본 그대로라도 처리
             if (!dList.length && dAttr.trim()) dList = [dAttr.trim()];
